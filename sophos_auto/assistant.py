@@ -21,7 +21,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .classeur import ecrire_classeur
+from .parametres import charger as charger_parametres
 from .schema import DEMANDER
+
+PARAMS = charger_parametres()
 
 B, G, J, C, R, GR, F = "\033[1m", "\033[32m", "\033[33m", "\033[36m", "\033[31m", "\033[90m", "\033[0m"
 LARGEUR = 88
@@ -222,6 +225,8 @@ class Projet:
     reseaux_internes: list[str] = field(default_factory=list)
     zones_internes: list[str] = field(default_factory=list)
     serveurs: list[tuple[str, str, str]] = field(default_factory=list)  # (nom, ip, type)
+    vpn_sites: list[dict] = field(default_factory=list)       # pour les fiches « autre site »
+    teletravailleurs: list[dict] = field(default_factory=list)  # pour les fiches utilisateurs
     situation: str = "autre"
     central: bool = False          # le client est géré dans Sophos Central
     zero_touch: bool = False       # le boîtier est préconfiguré par Central (Zero Touch)
@@ -757,6 +762,8 @@ def etape_vpn_sites(p: Projet, situation: str) -> None:
                 "Réseaux locaux": locaux, "Réseaux distants": reseaux,
                 "Clé partagée": p.secret(f"Clé partagée du VPN {nom_vpn}", v, gen), "Profil IPsec": profil, "Rôle": role})
         p.resume.append(f"VPN site à site {nom_vpn} : {locaux} ⇄ {reseaux} ({distant})")
+        p.vpn_sites.append({"nom": nom_vpn, "site": nom, "distant": distant, "locaux": locaux, "reseaux": reseaux,
+                            "profil": profil, "role": role})
         p.a_faire.append(f"VPN {nom_vpn} : configurer l'autre pare-feu en miroir (réseaux locaux/distants inversés, "
                          f"même clé, même profil, adresse distante = {p.adresse_publique or 'IP publique de ce site'}), "
                          f"puis activer la connexion dans VPN > IPsec.")
@@ -772,6 +779,15 @@ def etape_teletravail(p: Projet, situation: str) -> None:
                     "C'est l'adresse que les postes en télétravail contacteront.")
     p.adresse_publique = adresse
     reseaux = texte("Réseaux accessibles en VPN (séparés par ;)", ";".join(p.reseaux_internes), valider=_v_reseaux)
+    pris = [ipaddress.IPv4Network(r, strict=False) for r in p.reseaux_internes]
+    for v in p.lignes.get("VPN sites", []):
+        pris += [ipaddress.IPv4Network(x.strip(), strict=False) for x in re.split(r"[;,]", v["Réseaux distants"]) if x.strip()]
+    for troisieme in range(234, 254):
+        pool = ipaddress.IPv4Network(f"10.81.{troisieme}.0/24")
+        if not any(pool.overlaps(n) for n in pris):
+            break
+    p.general.update({"Début plage VPN": str(pool.network_address + 5), "Fin plage VPN": str(pool.network_address + 55),
+                      "Masque plage VPN": "255.255.255.0"})
     p.general.update({"VPN télétravail activé": "Oui", "Adresse publique du pare-feu": adresse,
                       "Réseaux accessibles en VPN": reseaux, "DNS pour les clients VPN": p.ad_ip,
                       "Domaine pour les clients VPN": p.domaine})
@@ -794,6 +810,7 @@ def etape_teletravail(p: Projet, situation: str) -> None:
             v, gen = mot_de_passe(f"Mot de passe du compte {ident}", generer_ok=False)
         p.ligne("Comptes", Identifiant=ident, **{"Nom complet": nom}, Type="Utilisateur", **{"E-mail": mail,
                 "Mot de passe": p.secret(f"Mot de passe du compte {ident}", v, gen), "VPN télétravail": "Oui"})
+        p.teletravailleurs.append({"identifiant": ident, "nom": nom, "email": mail})
     nb = sum(1 for c in p.lignes.get("Comptes", []) if c.get("VPN télétravail") == "Oui")
     p.resume.append(f"VPN télétravail (SSL VPN) : {nb} compte(s), accès à {reseaux}")
     p.infos_client.append("Télétravail : chaque personne installe Sophos Connect, se connecte au portail utilisateur "
@@ -804,8 +821,14 @@ def etape_teletravail(p: Projet, situation: str) -> None:
 
 def etape_administration(p: Projet) -> None:
     titre("12. ADMINISTRATION, ALERTES ET SAUVEGARDES")
-    p.general["Fuseau horaire"] = texte("Fuseau horaire", "Europe/Paris", "Ex. Europe/Paris, Europe/Brussels, Europe/Zurich, "
-                                                                         "America/Montreal, Indian/Reunion.")
+    fuseau = PARAMS.get("fuseau_defaut") or "Europe/Paris"
+    if not oui_non(f"Le client est-il dans le fuseau horaire {FUSEAUX.get(fuseau, fuseau)} ?", True):
+        fuseau = choix("Quel fuseau horaire ?", [(k, v) for k, v in FUSEAUX.items()] + [("autre", "Autre")], 1)
+        if fuseau == "autre":
+            fuseau = texte("Nom du fuseau (format Région/Ville)", "Europe/Paris",
+                           "Ex. Europe/Madrid, America/Cayenne, Pacific/Noumea, Africa/Casablanca.",
+                           lambda t: None if re.fullmatch(r"[A-Za-z_]+/[A-Za-z_/-]+", t) else "Format attendu : Région/Ville")
+    p.general["Fuseau horaire"] = fuseau
     wan_statique = any(l.get("Mode") == "Statique" and l.get("Zone") == "WAN" for l in p.lignes.get("Interfaces", []))
     if wan_statique or oui_non("Choisir les serveurs DNS du pare-feu (sinon ceux de l'opérateur) ?", False,
                                "Les DNS traduisent les noms (google.fr) en adresses. Ceux de l'opérateur conviennent "
@@ -816,7 +839,7 @@ def etape_administration(p: Projet) -> None:
     if oui_non("Créer un compte administrateur nominatif pour votre société (au lieu d'utiliser « admin ») ?", True,
                "Bonne pratique : chaque technicien a son compte, on sait qui a fait quoi, et le compte « admin » "
                "reste en secours."):
-        ident = texte("Identifiant administrateur", "admin-presta",
+        ident = texte("Identifiant administrateur", PARAMS.get("prefixe_admin") or "admin-presta",
                       valider=lambda t: None if re.fullmatch(r"[a-zA-Z0-9._-]{2,40}", t) else "Lettres, chiffres, . _ -")
         v, gen = mot_de_passe(f"Mot de passe du compte {ident}")
         p.ligne("Comptes", Identifiant=ident, **{"Nom complet": "Administrateur prestataire"}, Type="Administrateur",
@@ -837,7 +860,7 @@ def etape_administration(p: Projet) -> None:
             serveur = texte("Adresse du serveur SMTP")
             port = texte("Port SMTP", "587", "587 (STARTTLS) le plus souvent, 465 (SSL/TLS), 25 (sans chiffrement).")
         exp = texte("Adresse expéditeur (compte utilisé pour envoyer)", valider=_v_email)
-        dest = texte("Adresse qui reçoit les alertes", valider=_v_email)
+        dest = texte("Adresse qui reçoit les alertes", PARAMS.get("email_support", ""), valider=_v_email)
         p.general.update({"Serveur SMTP": serveur, "Port SMTP": port,
                           "Sécurité SMTP": {"465": "SSL/TLS", "25": "Aucune"}.get(port, "STARTTLS"),
                           "Adresse expéditeur": exp, "Destinataire des alertes": dest})
@@ -908,6 +931,15 @@ def fiche_zero_touch(p: Projet) -> list[str]:
     return l
 
 
+FUSEAUX = {
+    "Europe/Paris": "France métropolitaine", "Europe/Brussels": "Belgique", "Europe/Zurich": "Suisse",
+    "Europe/Luxembourg": "Luxembourg", "America/Montreal": "Québec", "Indian/Reunion": "La Réunion",
+    "America/Martinique": "Martinique", "America/Guadeloupe": "Guadeloupe", "America/Cayenne": "Guyane",
+    "Indian/Mayotte": "Mayotte", "Pacific/Noumea": "Nouvelle-Calédonie", "Pacific/Tahiti": "Polynésie",
+    "Africa/Casablanca": "Maroc",
+}
+
+
 A_FAIRE_COMMUN = [
     "Mettre à jour le firmware (Sauvegarde et firmware > Firmware) AVANT la mise en production.",
     "Vérifier les licences et l'enregistrement du boîtier (Administration > Licences).",
@@ -952,8 +984,16 @@ def etape_fin(p: Projet) -> None:
     if p.generes:
         fiche += ["", "Mots de passe générés : affichés une seule fois à l'écran, NON enregistrés dans ce fichier."]
     Path(f"{base}_fiche.txt").write_text("\n".join(fiche) + "\n", encoding="utf-8")
+    fiches = ecrire_fiches_annexes(p, base)
 
     print(f"\n{G}Fichiers créés :{F}\n  - {xlsx}  (configuration, modifiable dans Excel)\n  - {base}_fiche.txt  (récapitulatif et étapes manuelles)")
+    for f in fiches:
+        print(f"  - {f}")
+    try:
+        from .documentation import generer
+        print(f"  - {generer(xlsx)}  (dossier technique à remettre au client)")
+    except Exception as exc:  # le dossier est un bonus : ne jamais bloquer la fin de l'assistant
+        print(f"{J}  (dossier technique non généré : {exc}){F}")
     if p.generes:
         print(f"\n{J}{B}Mots de passe générés — NOTEZ-LES MAINTENANT (ils ne sont enregistrés nulle part) :{F}")
         for lib, v in p.generes:
@@ -978,6 +1018,53 @@ def etape_fin(p: Projet) -> None:
         return
     if oui_non("La simulation est correcte. Envoyer au pare-feu ?", True):
         deployer(xlsx, secrets=dict(p.secrets), ip_pc_apres=ip_pc)
+
+
+def ecrire_fiches_annexes(p: Projet, base: Path) -> list[str]:
+    """Fiche « autre site » pour chaque VPN, et fiche d'installation pour chaque télétravailleur."""
+    crees = []
+    client = p.general.get("Nom du client", "")
+    for v in p.vpn_sites:
+        f = Path(f"{base}_vpn_{_slug(v['site'])}.txt")
+        f.write_text("\n".join([
+            f"VPN {v['nom']} — réglages à saisir sur le pare-feu du site « {v['site']} »",
+            "=" * 70, "",
+            f"Ce document décrit la configuration à faire EN FACE pour le tunnel vers {client}.", "",
+            "  Type de connexion      : IPsec site à site",
+            f"  Adresse du site distant: {p.adresse_publique or '(IP publique de ' + client + ')'}",
+            f"  Réseaux locaux         : {v['reseaux']}   (les réseaux de {v['site']})",
+            f"  Réseaux distants       : {v['locaux']}   (les réseaux de {client})",
+            f"  Profil de chiffrement  : {v['profil']} (identique des deux côtés)",
+            "  Authentification       : clé partagée — transmise séparément, par un moyen sûr",
+            f"  Rôle                   : {'Répondre (attendre la connexion)' if v['role'] == 'Initier' else 'Initier la connexion'}",
+            "",
+            "Pensez aussi aux règles de pare-feu dans les deux sens (VPN <-> LAN) entre ces réseaux.",
+            "Les deux sites ne doivent pas utiliser le même plan d'adressage.",
+        ]) + "\n", encoding="utf-8")
+        crees.append(f"{f}  (à transmettre à qui gère l'autre site)")
+    if p.teletravailleurs:
+        dossier = Path(f"{base}_teletravail")
+        dossier.mkdir(exist_ok=True)
+        adresse = p.general.get("Adresse publique du pare-feu") or "(adresse communiquée par votre service informatique)"
+        for u in p.teletravailleurs:
+            (dossier / f"{u['identifiant']}.txt").write_text("\n".join([
+                f"Accès à distance (VPN) — {u['nom']}", "=" * 60, "",
+                f"Votre identifiant : {u['identifiant']}",
+                "Votre mot de passe vous est communiqué séparément (jamais par e-mail avec ce document).", "",
+                "Installation (une seule fois) :",
+                "  1. Installez le logiciel « Sophos Connect » fourni par votre service informatique.",
+                "  2. Récupérez votre fichier de configuration VPN depuis le portail utilisateur du pare-feu",
+                "     (adresse fournie par votre service informatique), avec votre identifiant.",
+                "  3. Ouvrez Sophos Connect > Importer une connexion > choisissez ce fichier.", "",
+                "Utilisation :",
+                "  - Cliquez sur « Se connecter », saisissez votre identifiant et votre mot de passe.",
+                "  - Une fois connecté, vous accédez aux serveurs et fichiers de l'entreprise.",
+                "  - Déconnectez-vous quand vous avez fini.", "",
+                f"Adresse du pare-feu : {adresse}",
+                "En cas de problème, contactez votre service informatique.",
+            ]) + "\n", encoding="utf-8")
+        crees.append(f"{dossier}/  ({len(p.teletravailleurs)} fiche(s) à remettre aux télétravailleurs)")
+    return crees
 
 
 def _ecrire_secrets(p: Projet) -> None:
@@ -1079,6 +1166,7 @@ def _choisir_brouillon() -> tuple[Projet, int] | None:
 
 
 def main() -> int:
+    PARAMS.update(charger_parametres())
     try:
         repris = _choisir_brouillon()
     except Retour:

@@ -7,6 +7,7 @@ de connexion puis une opération (Get, Set, Remove).
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 
 import requests
@@ -30,6 +31,15 @@ class Resultat:
     deja_existant: bool = False
 
 
+_SECRETS_XML = re.compile(r"<(Password|PresharedKey|Key|EncryptionPassword|secureMasterKey|PasswordHash)>(.*?)</\1>",
+                          re.DOTALL)
+
+
+def masquer(xml: str) -> str:
+    """Remplace le contenu des balises de mots de passe par ********."""
+    return _SECRETS_XML.sub(lambda m: f"<{m.group(1)}>********</{m.group(1)}>", xml)
+
+
 def to_xml(objet: dict) -> str:
     """Transforme un dictionnaire en XML (les caractères spéciaux sont échappés)."""
     xml = xmltodict.unparse(objet, full_document=False, pretty=True)
@@ -44,6 +54,8 @@ class SophosAPI:
         self.mot_de_passe = mot_de_passe
         self.verifier_certificat = verifier_certificat
         self.timeout = timeout
+        self.tentatives = 3          # nouvelles tentatives en cas de coupure réseau passagère
+        self.journal = None          # fonction(texte) : journal technique (mots de passe masqués)
         if not verifier_certificat:
             # Les XGS sortent d'usine avec un certificat auto-signé.
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -52,19 +64,30 @@ class SophosAPI:
     def _requete(self, corps: str) -> dict:
         login = to_xml({"Login": {"Username": self.utilisateur, "Password": self.mot_de_passe}})
         payload = f"<Request>{login}{corps}</Request>"
-        try:
-            rep = requests.post(
-                self.url,
-                data={"reqxml": payload},
-                headers={"Accept": "application/xml"},
-                verify=self.verifier_certificat,
-                timeout=self.timeout,
-            )
-        except requests.exceptions.RequestException as exc:
-            raise ErreurConnexion(
-                f"Pare-feu injoignable sur {self.url} ({exc.__class__.__name__}). "
-                "Vérifiez le câble, l'adresse IP et que le port 4444 est accessible."
-            ) from exc
+        if self.journal:
+            self.journal(">>> " + masquer(corps))
+        for essai in range(1, max(1, self.tentatives) + 1):
+            try:
+                rep = requests.post(
+                    self.url,
+                    data={"reqxml": payload},
+                    headers={"Accept": "application/xml"},
+                    verify=self.verifier_certificat,
+                    timeout=self.timeout,
+                )
+                break
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                if essai < self.tentatives:
+                    time.sleep(2 * essai)
+                    continue
+                raise ErreurConnexion(
+                    f"Pare-feu injoignable sur {self.url} ({exc.__class__.__name__}). "
+                    "Vérifiez le câble, l'adresse IP et que le port 4444 est accessible."
+                ) from exc
+            except requests.exceptions.RequestException as exc:
+                raise ErreurConnexion(f"Erreur de communication avec {self.url} ({exc.__class__.__name__}).") from exc
+        if self.journal:
+            self.journal("<<< " + masquer(rep.text[:4000]))
 
         try:
             reponse = xmltodict.parse(rep.content.decode("utf-8", errors="replace"))["Response"]

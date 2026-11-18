@@ -114,6 +114,32 @@ def afficher(ecarts: list[Ecart], verifies: int) -> None:
           f"ré-appliquez le fichier (les objets existants sont mis à jour).")
 
 
+def rapport_html(ecarts: list[Ecart], verifies: int, client: str, cible: str) -> str:
+    import datetime as dt
+    import html as h
+    lignes = "".join(
+        f"<tr><td style='color:{'#c0392b' if e.type == 'absent' else '#d68910'};font-weight:bold'>{e.type}</td>"
+        f"<td>{h.escape(e.op.libelle)}</td><td>{'<br>'.join(h.escape(d) for d in e.details[:8])}</td></tr>"
+        for e in ecarts)
+    etat = (f"<p style='color:#1e8449'><b>Conforme</b> : les {verifies} éléments du fichier sont présents et identiques.</p>"
+            if not ecarts else f"<p><b>{len(ecarts)}</b> écart(s) sur {verifies} éléments vérifiés.</p>")
+    return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conformité du pare-feu</title><style>body{{font-family:Segoe UI,Arial,sans-serif;max-width:960px;margin:24px auto;padding:0 16px;background:#fff;color:#222}}
+table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #eee;padding:6px;text-align:left;vertical-align:top}}</style></head>
+<body><h1>Conformité du pare-feu</h1><p style="color:#666">{h.escape(client)} — {h.escape(cible)} — {dt.datetime.now():%d/%m/%Y %H:%M}</p>
+{etat}{"<table><tr><th>Écart</th><th>Élément</th><th>Détail</th></tr>" + lignes + "</table>" if ecarts else ""}</body></html>"""
+
+
+def enregistrer_rapport(ecarts, verifies, client, cible) -> "Path":
+    import datetime as dt
+    import re
+    from pathlib import Path
+    Path("rapports").mkdir(exist_ok=True)
+    f = Path("rapports") / f"conformite_{re.sub(r'[^A-Za-z0-9_-]', '_', client)}_{dt.datetime.now():%Y-%m-%d_%H%M}.html"
+    f.write_text(rapport_html(ecarts, verifies, client, cible), encoding="utf-8")
+    return f
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Compare un pare-feu à son fichier client (lecture seule).")
     p.add_argument("fichier")
@@ -129,6 +155,8 @@ def main(argv=None) -> int:
         print(f"{ROUGE}✘ {exc}{FIN}")
         return 1
     afficher(ecarts, n)
+    client = lire_classeur(a.fichier).general.get("Nom du client") or a.fichier
+    print(f"Rapport : {enregistrer_rapport(ecarts, n, client, ip)}")
     return 0 if not ecarts else 2
 
 

@@ -30,20 +30,23 @@ Un outil pour configurer un pare-feu **Sophos XGS**, **même sans être expert**
 
 ## Le menu principal
 
-Double-cliquez sur **`demarrer.bat`**, ou tapez `python -m sophos_auto` :
+Double-cliquez sur **SophosXGS.exe**, ou sur `demarrer.bat`, ou tapez `python -m sophos_auto`. Tapez `q` pour quitter.
 
-```
- 1. Nouveau client, ou reprendre une configuration en cours (assistant)
- 2. Appliquer un fichier client sur un pare-feu
- 3. Contrôle de sécurité d'un pare-feu (rapport pour le client)
- 4. Vérifier qu'un pare-feu correspond toujours à son fichier client
- 5. Revenir en arrière : annuler une application
- 6. Sophos Central : liste, sauvegarde, copie d'un pare-feu modèle
- 7. Liste des informations à demander au client avant l'intervention
- 8. Voir les objets d'un pare-feu (règles, hôtes, VPN...)
- 9. Créer un fichier Excel vierge (modèle)
-```
-Tapez `q` pour quitter.
+| N° | Fonction |
+|---|---|
+| 1 | Nouveau client, ou reprendre une configuration en cours (assistant) |
+| 2 | Nouveau client à partir d'un client existant (mêmes objets et règles, infos client effacées) |
+| 3 | **Diagnostic de connexion** : câble, adresse, API, IP autorisée, mot de passe — avec la solution |
+| 4 | Appliquer un fichier client (simulation, puis envoi ; mode prudent ; seulement certains onglets) |
+| 5 | Contrôle de sécurité, avec une **note sur 100** et un rapport HTML pour le client |
+| 6 | Conformité : le pare-feu correspond-il toujours à son fichier ? (rapport HTML) |
+| 7 | Revenir en arrière : annuler une application |
+| 8 | Sophos Central : liste, inventaire Excel, sauvegarde d'un ou de **tous** les pare-feux, copie d'un modèle |
+| 9 | **Dossier technique** du client (page HTML imprimable, sans mot de passe) |
+| 10 | Liste des informations à demander au client |
+| 11 | Voir les objets d'un pare-feu |
+| 12 | Fichier Excel vierge |
+| 13 | **Mes paramètres** : nom de votre société (affiché dans les rapports), e-mail du support, valeurs par défaut |
 
 ## 2. Préparer le XGS (à chaque boîtier neuf)
 
@@ -185,6 +188,41 @@ Sans la clé maître de stockage sécurisé (SSMK), les mots de passe et donnée
 2. « Copier le pare-feu modèle » pour vos standards.
 3. L'assistant pour les spécificités du client.
 
+## Nouveautés de la version 4
+
+**Contrôles du fichier, avant tout envoi :**
+- réseaux qui se chevauchent : LAN, VLAN, Wi-Fi, réseaux distants des VPN, plage du VPN télétravail ;
+- plage DHCP en dehors du réseau ou qui contient l'adresse du pare-feu ; réservations en double ;
+- deux objets pour la même adresse. Un objet déjà déclaré est **réutilisé** au lieu d'être recréé ;
+- **redirection dangereuse** (bureau à distance, partage de fichiers, base de données…) ouverte à tout Internet.
+
+**Application :**
+- nouvelles tentatives automatiques en cas de micro-coupure réseau ;
+- progression affichée (`[12/47]`) et résumé de ce qui va être fait ;
+- **mode prudent** (`--prudent`) : rien de ce qui existe n'est modifié, idéal sur un pare-feu déjà en production ;
+- **application partielle** (`--seulement Règles,Hôtes`) ;
+- **journal technique** (`--debug`), mots de passe masqués ;
+- **rapport HTML** à remettre au client, au nom de votre société.
+
+**Assistant :**
+- fuseau horaire choisi dans une liste (France, Belgique, Suisse, DOM-TOM, Québec…) ;
+- plage du VPN télétravail choisie automatiquement pour ne chevaucher aucun réseau ;
+- **fiche « autre site »** pour chaque VPN, avec les réglages en miroir à transmettre à qui gère l'autre pare-feu ;
+- **une fiche d'installation par télétravailleur** (sans mot de passe) ;
+- dossier technique généré automatiquement à la fin.
+
+**Contrôle de sécurité :**
+- note sur 100 ;
+- règles en double ;
+- ping ouvert sur Internet ;
+- export JSON pour suivre l'évolution d'un client.
+
+**Sophos Central :**
+- sauvegarde de tous les pare-feux en une fois ;
+- inventaire Excel ;
+- vérification du firmware avant export/import : SFOS 22.0 MR2 minimum, cibles au moins au niveau du modèle ;
+- nouvelles tentatives automatiques si Central est surchargé.
+
 ## 7. Le fichier Excel
 
 L'assistant le remplit pour vous, mais vous pouvez aussi l'écrire ou le corriger à la main. Partez de `modele_client.xlsx` ; ses lignes jaunes sont des exemples.
@@ -243,6 +281,9 @@ Restent **manuels**, et sont rappelés dans la fiche :
 | `sophos_auto/__main__.py` | Le menu principal |
 | `sophos_auto/assistant.py` | L'assistant pas à pas |
 | `sophos_auto/audit.py` | Contrôle de sécurité et rapport HTML |
+| `sophos_auto/diagnostic.py` | Diagnostic de connexion |
+| `sophos_auto/documentation.py` | Dossier technique HTML du client |
+| `sophos_auto/parametres.py` | Vos paramètres (parametres.json) |
 | `sophos_auto/restaurer.py` | Revenir en arrière à partir de l'état enregistré |
 | `sophos_auto/conformite.py` | Comparaison pare-feu / fichier client |
 | `.github/workflows/windows.yml` | Tests automatiques et construction de SophosXGS.exe |

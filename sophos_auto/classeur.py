@@ -81,6 +81,7 @@ def ecrire_classeur(chemin: str, general: dict[str, str] | None = None,
                 dv.error, dv.errorTitle = f"Valeurs possibles : {', '.join(valeurs)}", "Valeur non valide"
                 ws.add_data_validation(dv)
                 dv.add(f"{lettre}2:{lettre}500")
+        ws.auto_filter.ref = f"A1:{ws.cell(1, len(colonnes)).column_letter}{max(2, len(lignes.get(nom, [])) + 1)}"
         for r, ligne in enumerate(lignes.get(nom, []), start=2):
             for col, (titre, _, _) in enumerate(colonnes, start=1):
                 val = ligne.get(titre, "Oui" if titre == "Actif" else "")

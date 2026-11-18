@@ -102,6 +102,12 @@ class Configuration:
             if re.fullmatch(r"[\d./\- ]+", t):
                 raise ErreurLigne(f"adresse invalide : « {t} »") from None
             return t  # c'est un nom d'objet
+        cles = ("HostType", "IPAddress", "Subnet", "StartIPAddress", "EndIPAddress")
+        existant = next((o.nom for o in self.operations if o.balise == "IPHost" and o.onglet != "Auto"
+                         and all(o.contenu.get(k) == contenu.get(k) for k in cles)), None)
+        if existant:   # un objet de même adresse est déjà déclaré : on le réutilise
+            self._auto[t] = existant
+            return existant
         self._auto[t] = nom
         if not self.defini("reseau", nom):
             self.ajouter(Operation("Auto", ligne, nom, "IPHost", contenu, ETAPES["hôtes"]), "reseau")
@@ -209,6 +215,27 @@ def _ports(v) -> list[str]:
     if not ports:
         raise ErreurLigne("aucun port indiqué")
     return ports
+
+
+PORTS_SENSIBLES = {3389: "le bureau à distance (RDP)", 445: "le partage de fichiers Windows (SMB)", 139: "NetBIOS",
+                   23: "Telnet", 21: "FTP", 22: "SSH", 1433: "SQL Server", 3306: "MySQL", 5900: "VNC",
+                   135: "RPC Windows", 5985: "WinRM", 5986: "WinRM"}
+
+
+def _port_risque(texte: str) -> str:
+    """Renvoie la description du port sensible contenu dans « TCP 3389 », « 3389 », « RDP »..., sinon ""."""
+    t = texte.strip().upper()
+    if not t:
+        return ""
+    for mot, port in (("RDP", 3389), ("SMB", 445), ("TELNET", 23), ("VNC", 5900)):
+        if mot in t:
+            return PORTS_SENSIBLES[port]
+    for a, b in re.findall(r"(\d{1,5})(?:\s*[-:]\s*(\d{1,5}))?", t):
+        debut, fin = int(a), int(b or a)
+        for port, lib in PORTS_SENSIBLES.items():
+            if debut <= port <= fin:
+                return lib
+    return ""
 
 
 def _secret(v, libelle: str):
@@ -526,6 +553,10 @@ def _redirections(cfg, c, onglet, ligne):
         raise ErreurLigne("serveur interne manquant")
     serveur = cfg.reseau(serveur_txt, onglet, ligne)
     svc_ext = cfg.service(externe, ligne)
+    risque = _port_risque(externe) or _port_risque(_txt(c["Port interne"]))
+    if risque and not _liste(c["Sources autorisées"]):
+        cfg.avertissements.append(f"[{onglet} ligne {ligne}] SÉCURITÉ : {risque} ouvert à tout Internet. "
+                                  "Préférez le VPN, ou limitez les sources autorisées.")
     svc_int = "Original"
     if _txt(c["Port interne"]):
         proto = "UDP" if externe.lower().startswith("udp") else "TCP"
@@ -750,9 +781,92 @@ def lire_classeur(chemin: str) -> Configuration:
         cfg.erreurs.append(f"[Général] {exc}")
 
     _doublons(cfg)
+    _coherence(cfg)
     _verifier_references(cfg)
     cfg.operations.sort(key=lambda o: o.etape)
     return cfg
+
+
+def _reseau_objet(cfg: Configuration, nom: str) -> ipaddress.IPv4Network | None:
+    o = next((x for x in cfg.operations if x.balise == "IPHost" and x.nom == nom), None)
+    if not o:
+        return None
+    c = o.contenu
+    try:
+        if c.get("HostType") == "Network":
+            return ipaddress.IPv4Network(f"{c['IPAddress']}/{c['Subnet']}", strict=False)
+        if c.get("HostType") == "IP":
+            return ipaddress.IPv4Network(f"{c['IPAddress']}/32")
+    except (KeyError, ValueError):
+        pass
+    return None
+
+
+def _coherence(cfg: Configuration) -> None:
+    """Contrôles qui demandent de voir tout le fichier : chevauchements de réseaux, DHCP, doublons."""
+    ou = lambda o: f"[{o.onglet} ligne {o.ligne}]" if o.ligne else f"[{o.onglet}]"  # noqa: E731
+    # 1. réseaux des interfaces (LAN, VLAN, Wi-Fi...) qui se chevauchent
+    locaux: list[tuple[str, ipaddress.IPv4Network]] = []
+    vus = set()
+    for nom, (ip, masque) in cfg.ip_interfaces.items():
+        n = ipaddress.IPv4Interface(f"{ip}/{masque}").network
+        if (ip, masque) in vus:
+            continue
+        vus.add((ip, masque))
+        for autre, n2 in locaux:
+            if n.overlaps(n2):
+                cfg.erreurs.append(f"Les réseaux de {autre} ({n2}) et de {nom} ({n}) se chevauchent : "
+                                   "chaque interface doit avoir son propre réseau.")
+        locaux.append((nom, n))
+    # 2. réseaux distants des VPN et plage du VPN télétravail qui chevauchent un réseau local
+    for o in cfg.operations:
+        if o.balise == "VPNIPSecConnection" and "Configuration" in o.contenu:
+            for r in o.contenu["Configuration"]["RemoteNetwork"]["Network"]:
+                n = _reseau_objet(cfg, r)
+                for nom, loc in locaux:
+                    if n and n.overlaps(loc):
+                        cfg.erreurs.append(f"{ou(o)} le réseau distant {n} chevauche le réseau local de {nom} ({loc}) : "
+                                           "le VPN ne peut pas fonctionner. Changez le plan d'adressage d'un des sites.")
+        if o.balise == "SSLTunnelAccessSettings":
+            debut = o.contenu["IPLeaseRange"]["StartIP"]
+            for nom, loc in locaux:
+                if ipaddress.IPv4Address(debut) in loc:
+                    cfg.erreurs.append(f"[Général] la plage du VPN télétravail ({debut}...) est dans le réseau de {nom} "
+                                       f"({loc}) : choisissez une plage inutilisée (ex. 10.81.234.5).")
+    # 3. DHCP : plage dans le réseau de l'interface, sans l'IP du pare-feu ; réservations cohérentes
+    for o in cfg.operations:
+        if o.balise != "DHCPServer":
+            continue
+        ip_if = cfg.ip_interfaces.get(o.contenu["Interface"])
+        debut, fin = (ipaddress.IPv4Address(x) for x in o.contenu["IPLease"]["IP"].split("-"))
+        if ip_if:
+            reseau = ipaddress.IPv4Interface(f"{ip_if[0]}/{ip_if[1]}").network
+            if debut not in reseau or fin not in reseau:
+                cfg.erreurs.append(f"{ou(o)} la plage {debut}-{fin} sort du réseau {reseau} de l'interface "
+                                   f"{o.contenu['Interface']}.")
+            if debut <= ipaddress.IPv4Address(ip_if[0]) <= fin:
+                cfg.erreurs.append(f"{ou(o)} la plage {debut}-{fin} contient l'adresse du pare-feu ({ip_if[0]}).")
+        baux = o.contenu.get("StaticLease", {}).get("Lease", [])
+        macs, ips = set(), set()
+        for b in baux:
+            if b["MACAddress"] in macs:
+                cfg.erreurs.append(f"{ou(o)} l'adresse MAC {b['MACAddress']} est réservée deux fois.")
+            if b["IPAddress"] in ips:
+                cfg.erreurs.append(f"{ou(o)} l'adresse {b['IPAddress']} est réservée deux fois.")
+            macs.add(b["MACAddress"])
+            ips.add(b["IPAddress"])
+            if ip_if and ipaddress.IPv4Address(b["IPAddress"]) not in ipaddress.IPv4Interface(
+                    f"{ip_if[0]}/{ip_if[1]}").network:
+                cfg.erreurs.append(f"{ou(o)} la réservation {b['IPAddress']} ({b['HostName']}) n'est pas dans le "
+                                   "réseau de l'interface.")
+    # 4. deux objets différents pour la même adresse IP
+    par_ip: dict[str, str] = {}
+    for o in cfg.operations:
+        if o.balise == "IPHost" and o.contenu.get("HostType") == "IP":
+            ip = o.contenu["IPAddress"]
+            if ip in par_ip and par_ip[ip] != o.nom:
+                cfg.avertissements.append(f"{ou(o)} « {o.nom} » et « {par_ip[ip]} » ont la même adresse {ip}.")
+            par_ip.setdefault(ip, o.nom)
 
 
 def _doublons(cfg: Configuration) -> None:

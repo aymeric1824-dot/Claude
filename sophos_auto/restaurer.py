@@ -134,7 +134,7 @@ def appliquer_plan(api: SophosAPI, actions: list[Action]) -> tuple[int, list[str
     return ok, erreurs
 
 
-def restaurer(fichier: str, api: SophosAPI, confirmer=None) -> int:
+def restaurer(fichier: str, api: SophosAPI, confirmer=None, simulation: bool = False) -> int:
     avant = json.loads(Path(fichier).read_text(encoding="utf-8"))
     print("Comparaison avec l'état actuel du pare-feu...")
     actions = plan(api, avant)
@@ -143,6 +143,9 @@ def restaurer(fichier: str, api: SophosAPI, confirmer=None) -> int:
         return 0
     for a in actions:
         print(f"  {ROUGE + 'supprimer' if a.type == 'supprimer' else JAUNE + 'remettre '}{FIN} {a.balise:<22} {a.nom}")
+    if simulation:
+        print(f"\n{GRIS}Simulation : rien n'a été modifié.{FIN}")
+        return 0
     question = f"Appliquer ces {len(actions)} action(s) ?"
     rep = confirmer(question) if confirmer else input(f"{question} (o/N) ").strip().lower() in ("o", "oui")
     if not rep:
@@ -162,10 +165,11 @@ def main(argv=None) -> int:
     p.add_argument("--ip", default="172.16.16.16")
     p.add_argument("--port", type=int, default=4444)
     p.add_argument("--utilisateur", default="admin")
+    p.add_argument("--simulation", action="store_true", help="Afficher seulement ce qui serait fait")
     a = p.parse_args(argv)
     mdp = os.environ.get("SOPHOS_MOT_DE_PASSE") or getpass.getpass(f"Mot de passe de « {a.utilisateur} » : ")
     try:
-        return restaurer(a.fichier, SophosAPI(a.ip, a.utilisateur, mdp, port=a.port))
+        return restaurer(a.fichier, SophosAPI(a.ip, a.utilisateur, mdp, port=a.port), simulation=a.simulation)
     except ErreurAPI as exc:
         print(f"{ROUGE}✘ {exc}{FIN}")
         return 1

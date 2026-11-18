@@ -106,6 +106,10 @@ def auditer(api: SophosAPI) -> list[Constat]:
             c.append(Constat(ATTENTION, "Portail utilisateur accessible depuis Internet",
                              "Le portail utilisateur est ouvert dans la zone WAN.",
                              "Fermez-le si les utilisateurs n'en ont pas besoin depuis l'extérieur."))
+        if (acces.get("NetworkServices") or {}).get("Ping") == "Enable":
+            c.append(Constat(INFO, "Le pare-feu répond au ping depuis Internet",
+                             "Il est ainsi plus facile à repérer par les robots qui scannent Internet.",
+                             "Désactivez le ping sur la zone WAN, sauf besoin de supervision externe."))
         if (acces.get("NetworkServices") or {}).get("DNS") == "Enable":
             c.append(Constat(ATTENTION, "Serveur DNS du pare-feu ouvert sur Internet",
                              "Le service DNS est autorisé depuis la zone WAN.",
@@ -132,7 +136,20 @@ def auditer(api: SophosAPI) -> list[Constat]:
 
     # ---- règles de pare-feu
     desactivees = 0
+    empreintes: dict[str, str] = {}
     for r in lire("FirewallRule"):
+        p0 = r.get("NetworkPolicy") or r.get("UserPolicy") or {}
+        if r.get("Status") != "Disable":
+            emp = repr([p0.get("Action"), sorted(_valeurs(p0.get("SourceZones"), "Zone")),
+                        sorted(_valeurs(p0.get("DestinationZones"), "Zone")),
+                        sorted(_valeurs(p0.get("SourceNetworks"), "Network")),
+                        sorted(_valeurs(p0.get("DestinationNetworks"), "Network")),
+                        sorted(_valeurs(p0.get("Services"), "Service"))])
+            if emp in empreintes:
+                c.append(Constat(INFO, f"Règles en double : « {empreintes[emp]} » et « {r.get('Name')} »",
+                                 "Les deux règles portent sur le même trafic : la seconde ne sert jamais.",
+                                 "Supprimez celle qui est en trop pour garder une configuration lisible."))
+            empreintes.setdefault(emp, r.get("Name", "?"))
         nom = r.get("Name", "?")
         if r.get("Status") == "Disable":
             desactivees += 1
@@ -208,6 +225,13 @@ def auditer(api: SophosAPI) -> list[Constat]:
     return sorted(c, key=lambda x: ORDRE[x.niveau])
 
 
+def note(constats: list[Constat]) -> int:
+    """Note sur 100 : -25 par point critique, -8 par point à corriger, -2 par conseil."""
+    retrait = {CRITIQUE: 25, ATTENTION: 8, INFO: 2}
+    reel = [c for c in constats if c.titre != "Aucun problème critique détecté"]
+    return max(0, 100 - sum(retrait[c.niveau] for c in reel))
+
+
 # ----------------------------------------------------------------------------- rapport
 COULEURS = {CRITIQUE: "#c0392b", ATTENTION: "#d68910", INFO: "#2e86c1"}
 
@@ -220,6 +244,9 @@ def rapport_html(constats: list[Constat], cible: str, client: str = "") -> str:
         f'{COULEURS[x.niveau]}">{x.niveau}</span><h3>{html.escape(x.titre)}</h3><p>{html.escape(x.detail)}</p>'
         f'<p class="k"><b>Que faire :</b> {html.escape(x.conseil)}</p></div>' for x in constats)
     resume = " ".join(f'<span class="b" style="background:{COULEURS[n]}">{nb[n]} {n.lower()}</span>' for n in ORDRE)
+    score = note(constats)
+    teinte = "#1e8449" if score >= 80 else "#d68910" if score >= 50 else "#c0392b"
+    resume = f'<span class="b" style="background:{teinte};font-size:18px">Note : {score}/100</span> ' + resume
     return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Contrôle de sécurité</title><style>
 body{{font-family:Segoe UI,Arial,sans-serif;max-width:900px;margin:24px auto;padding:0 16px;color:#222;background:#fff}}
@@ -237,11 +264,17 @@ def executer(api: SophosAPI, cible: str, client: str = "") -> tuple[list[Constat
     nom = re.sub(r"[^A-Za-z0-9_-]", "_", client or cible)
     chemin = Path("rapports") / f"securite_{nom}_{dt.datetime.now():%Y-%m-%d_%H%M}.html"
     chemin.write_text(rapport_html(constats, cible, client), encoding="utf-8")
+    import json
+    chemin.with_suffix(".json").write_text(json.dumps(
+        {"client": client, "pare_feu": cible, "date": dt.datetime.now().isoformat(timespec="minutes"),
+         "note": note(constats), "constats": [c.__dict__ for c in constats]}, ensure_ascii=False, indent=1),
+        encoding="utf-8")
     return constats, chemin
 
 
 def afficher(constats: list[Constat]) -> None:
     coul = {CRITIQUE: "\033[31m", ATTENTION: "\033[33m", INFO: "\033[36m"}
+    print(f"\033[1mNote de sécurité : {note(constats)}/100\033[0m")
     for x in constats:
         print(f"{coul[x.niveau]}  [{x.niveau}] {x.titre}\033[0m\n      {x.detail}\n      → {x.conseil}")
 
@@ -260,7 +293,7 @@ def main(argv=None) -> int:
         print(f"\033[31m✘ {exc}\033[0m")
         return 1
     afficher(constats)
-    print(f"\nRapport : {chemin}")
+    print(f"\nNote de sécurité : {note(constats)}/100 — rapport : {chemin}")
     return 0
 
 

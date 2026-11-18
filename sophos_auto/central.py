@@ -15,6 +15,7 @@ d'environnement SOPHOS_CENTRAL_ID et SOPHOS_CENTRAL_SECRET (jamais enregistrés 
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,15 @@ class PareFeu:
                    serie=d.get("serialNumber", ""), modele=d.get("model", ""),
                    firmware=d.get("firmwareVersion", ""), connecte=bool(statut.get("connected")),
                    ip_publiques=list(d.get("externalIpv4Addresses") or []))
+
+
+def firmware_compatible(version: str) -> bool | None:
+    """Export / import Central : SFOS 22.0 MR2 minimum. None si la version est illisible."""
+    m = re.search(r"(\d+)\.(\d+)(?:\.\d+)?(?:[ .-]*MR[- ]?(\d+))?", version or "", re.IGNORECASE)
+    if not m:
+        return None
+    majeur, mineur, mr = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+    return (majeur, mineur, mr) >= (22, 0, 2)
 
 
 def _message_http(rep: requests.Response) -> str:
@@ -111,11 +121,20 @@ class SophosCentral:
         return h
 
     def _appel(self, methode: str, url: str, *, entete_compte=True, json=None, params=None) -> dict:
-        try:
-            rep = self.session.request(methode, url, headers=self._entetes(entete_compte), json=json,
-                                       params=params, timeout=60)
-        except requests.exceptions.RequestException as exc:
-            raise ErreurCentral(f"Sophos Central injoignable ({exc.__class__.__name__}).") from exc
+        for essai in range(4):
+            try:
+                rep = self.session.request(methode, url, headers=self._entetes(entete_compte), json=json,
+                                           params=params, timeout=60)
+            except requests.exceptions.RequestException as exc:
+                if essai < 3:
+                    time.sleep(2 ** essai)
+                    continue
+                raise ErreurCentral(f"Sophos Central injoignable ({exc.__class__.__name__}).") from exc
+            if rep.status_code in (429, 502, 503, 504) and essai < 3:   # trop de requêtes / indisponible : on patiente
+                attente = rep.headers.get("Retry-After") if hasattr(rep, "headers") and rep.headers else None
+                time.sleep(int(attente) if attente and str(attente).isdigit() else 2 ** (essai + 1))
+                continue
+            break
         if rep.status_code >= 300:
             raise ErreurCentral(_message_http(rep))
         return rep.json() if rep.content else {}
@@ -163,6 +182,24 @@ class SophosCentral:
             if rappel:
                 rappel(d.get("status", "en cours"))
             time.sleep(5)
+
+    def sauvegarder_tous(self, dossier: Path, rappel=None) -> list[tuple[PareFeu, Path | str]]:
+        """Exporte la configuration de tous les pare-feux connectés et compatibles."""
+        resultats = []
+        for pf in self.pare_feux():
+            if not pf.connecte:
+                resultats.append((pf, "non connecté à Central"))
+                continue
+            if firmware_compatible(pf.firmware) is False:
+                resultats.append((pf, f"firmware {pf.firmware} trop ancien (SFOS 22.0 MR2 minimum)"))
+                continue
+            nom = re.sub(r"[^A-Za-z0-9_-]", "_", pf.nom)
+            try:
+                f = self.exporter(pf.id, dossier / f"{nom}_{pf.serie}_{time.strftime('%Y-%m-%d_%H%M%S')}.tar", rappel=rappel)
+                resultats.append((pf, f))
+            except ErreurCentral as exc:
+                resultats.append((pf, str(exc)))
+        return resultats
 
     def exporter(self, pare_feu_id: str, destination: Path, entites: list[str] | None = None, rappel=None) -> Path:
         corps = {"fullExport": True} if not entites else {"fullExport": False, "includeDependency": True,

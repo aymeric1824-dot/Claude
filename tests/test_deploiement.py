@@ -90,4 +90,4 @@ def test_simulation_n_envoie_rien(modele, faux):
     assert faux.requetes == []
     fichiers = list((faux_dir := __import__("pathlib").Path("simulation")).rglob("*.xml"))
     assert len(fichiers) > 10
-    assert all("MotDePasse" not in f.read_text() for f in fichiers)
+    assert all("MotDePasse" not in f.read_text(encoding="utf-8") for f in fichiers)

@@ -102,8 +102,15 @@ def _trouver(elements, champ: str, cle: str):
     return None
 
 
-def appliquer(api: SophosAPI, op: Operation) -> tuple[Resultat, str]:
+def appliquer(api: SophosAPI, op: Operation, sans_modifier: bool = False) -> tuple[Resultat, str]:
     contenu = _remplacer(op.contenu, masquer=False)
+    if sans_modifier:
+        if op.mode != "creer":
+            return Resultat(True, "", ""), "ignoré (mode prudent : réglage existant non modifié)"
+        res = api.ecrire(op.balise, contenu, "add")
+        if not res.ok and res.deja_existant:
+            return Resultat(True, res.code, res.message), "existe déjà : non modifié (mode prudent)"
+        return res, "créé"
     if op.mode == "maj":
         return api.ecrire(op.balise, contenu, "update"), "mis à jour"
     if op.mode == "creer":
@@ -209,6 +216,47 @@ def _reconnexion(api: SophosAPI, op: Operation, ip_pc: str | None, confirmer) ->
                 return None
 
 
+NOMS_BALISES = {
+    "IPHost": "objet(s) réseau", "FQDNHost": "objet(s) FQDN", "IPHostGroup": "groupe(s) d'hôtes",
+    "Services": "service(s)", "FirewallRule": "règle(s) de pare-feu", "NATRule": "redirection(s) NAT",
+    "Zone": "zone(s)", "VLAN": "VLAN", "Interface": "interface(s)", "DHCPServer": "serveur(s) DHCP",
+    "User": "compte(s)", "VPNIPSecConnection": "opération(s) VPN IPsec", "SSLVPNPolicy": "stratégie(s) VPN SSL",
+    "WirelessNetworks": "réseau(x) Wi-Fi", "UnicastRoute": "route(s)", "AuthenticationServer": "serveur(s) AD",
+}
+
+
+def resume_operations(operations: list[Operation]) -> list[str]:
+    """Résumé lisible : « 12 objet(s) réseau », « 5 règle(s) de pare-feu », réglages..."""
+    from collections import Counter
+    n = Counter(o.balise for o in operations if o.balise in NOMS_BALISES)
+    lignes = [f"{v} {NOMS_BALISES[k]}" for k, v in sorted(n.items(), key=lambda x: -x[1])]
+    autres = sorted({o.nom for o in operations if o.balise not in NOMS_BALISES})
+    if autres:
+        lignes.append("réglages : " + ", ".join(autres))
+    return lignes
+
+
+def rapport_html(client: str, cible: str, date: str, journal: list[str], avertissements: list[str],
+                 societe: str = "") -> str:
+    import html as h
+    couleurs = {"OK": "#1e8449", "ERREUR": "#c0392b", "ARRÊT": "#c0392b", "À FAIRE": "#d68910",
+                "À VÉRIFIER": "#d68910", "SÉCURITÉ": "#c0392b", "NON FAIT": "#c0392b"}
+    lignes = []
+    for j in journal:
+        etat = next((k for k in couleurs if j.startswith(k)), "")
+        lignes.append(f'<tr><td style="color:{couleurs.get(etat, "#333")};font-weight:bold">{h.escape(etat)}</td>'
+                      f'<td>{h.escape(j[len(etat):].strip())}</td></tr>')
+    ok = sum(j.startswith("OK") for j in journal)
+    ko = sum(j.startswith(("ERREUR", "ARRÊT", "NON FAIT")) for j in journal)
+    aw = "".join(f"<li>{h.escape(a)}</li>" for a in avertissements)
+    return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rapport de configuration</title><style>body{{font-family:Segoe UI,Arial,sans-serif;max-width:960px;margin:24px auto;padding:0 16px;color:#222;background:#fff}}
+table{{border-collapse:collapse;width:100%}}td{{border-bottom:1px solid #eee;padding:6px;vertical-align:top}}.s{{color:#666}}</style></head>
+<body><h1>Rapport de configuration du pare-feu</h1><p class="s">{h.escape(client)} — {h.escape(cible)} — {h.escape(date)}
+{(" — réalisé par " + h.escape(societe)) if societe else ""}</p><p><b>{ok}</b> opération(s) réussie(s), <b>{ko}</b> échec(s).</p>
+<table>{"".join(lignes)}</table>{f"<h2>Avertissements</h2><ul>{aw}</ul>" if aw else ""}</body></html>"""
+
+
 # ----------------------------------------------------------------------------- sécurité avant / après
 def photo_avant(api: SophosAPI, cfg: Configuration, chemin: Path) -> int:
     """Enregistre l'état actuel des types d'objets qui vont être modifiés (pour comparer ou revenir en arrière)."""
@@ -254,9 +302,16 @@ def verifier_presence(api: SophosAPI, operations: list[Operation]) -> list[Opera
 # ----------------------------------------------------------------------------- programme principal
 def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=None, mot_de_passe=None,
              verifier_certificat=False, continuer=False, secrets: dict[str, str] | None = None,
-             confirmer=None, ip_pc_apres: str | None = None) -> int:
+             confirmer=None, ip_pc_apres: str | None = None, seulement: list[str] | None = None,
+             sans_modifier: bool = False, debug: bool = False) -> int:
     print(f"Lecture de {fichier}...")
     cfg = lire_classeur(fichier)
+    if seulement:
+        voulus = {x.strip().lower() for x in seulement}
+        inconnus = voulus - {o.onglet.lower() for o in cfg.operations}
+        if inconnus:
+            print(f"{JAUNE}  Onglet(s) sans opération : {', '.join(sorted(inconnus))}{FIN}")
+        cfg.operations = [o for o in cfg.operations if o.onglet.lower() in voulus or o.onglet == "Auto"]
     g = cfg.general
     client = g.get("Nom du client") or Path(fichier).stem
     print(f"Client : {GRAS}{client}{FIN} — {len(cfg.operations)} opération(s)\n")
@@ -320,9 +375,23 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
         print(f"{ROUGE}✘ Impossible de lire l'état actuel : {exc}{FIN}")
         return 1
 
+    if debug:
+        trace = Path("rapports") / f"{_fichier(client)}_{horodatage}_debug.log"
+        fichier_trace = trace.open("a", encoding="utf-8")
+        api.journal = lambda t: (fichier_trace.write(f"{dt.datetime.now():%H:%M:%S} {t}\n"), fichier_trace.flush())
+        print(f"{GRIS}Journal technique (mots de passe masqués) : {trace}{FIN}")
+
+    print(f"\n{GRAS}Ce qui va être fait :{FIN}")
+    for ligne in resume_operations(cfg.operations):
+        print(f"  - {ligne}")
+    if sans_modifier:
+        print(f"{JAUNE}  Mode prudent : les objets et réglages existants ne seront pas modifiés.{FIN}")
+    print()
+
     demander_secrets(cfg, secrets)
 
     journal, nb_ok, nb_ko = [], 0, 0
+    total = len(cfg.operations)
     reussies: list[Operation] = []
     reconnecte = False
     for o in cfg.operations:
@@ -337,8 +406,11 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
                       f"pour terminer (le reste est déjà fait).{FIN}")
                 break
             api = api2
+        rang = f"{GRIS}[{cfg.operations.index(o) + 1}/{total}]{FIN}"
+        if o.etape == ETAPES["fin"]:
+            api.tentatives = 1     # la connexion va être coupée : inutile d'insister
         try:
-            res, action = appliquer(api, o)
+            res, action = appliquer(api, o, sans_modifier=sans_modifier)
         except ErreurConnexion as exc:
             if o.etape == ETAPES["fin"]:   # changement de l'IP de connexion : coupure normale
                 res, action = Resultat(True, "", ""), "appliqué (connexion coupée, c'est normal)"
@@ -352,15 +424,15 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
         if res.ok:
             nb_ok += 1
             reussies.append(o)
-            print(f"{VERT}  ✔{FIN} {o.libelle} {GRIS}({action}){FIN}")
+            print(f"{rang} {VERT}✔{FIN} {o.libelle} {GRIS}({action}){FIN}")
             journal.append(f"OK     {o.libelle} ({action})")
         elif o.facultatif:
-            print(f"{JAUNE}  ! {o.libelle} — non fait automatiquement ({res.code} : {res.message}). "
+            print(f"{rang} {JAUNE}! {o.libelle} — non fait automatiquement ({res.code} : {res.message}). "
                   f"À faire à la main : {o.conseil_echec}{FIN}")
             journal.append(f"À FAIRE {o.libelle} — {o.conseil_echec} ({res.code} : {res.message})")
         else:
             nb_ko += 1
-            print(f"{ROUGE}  ✘ {o.libelle} — {res.code} : {res.message}{FIN}")
+            print(f"{rang} {ROUGE}✘ {o.libelle} — {res.code} : {res.message}{FIN}")
             journal.append(f"ERREUR {o.libelle} — {res.code} : {res.message}")
 
     print("\nVérification : relecture du pare-feu...")
@@ -394,8 +466,12 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
         f"Réussis : {nb_ok}  Échecs : {nb_ko}\n\n" + "\n".join(journal) + "\n"
         + ("\nAvertissements :\n" + "\n".join(cfg.avertissements) + "\n" if cfg.avertissements else ""),
         encoding="utf-8")
+    rapport_web = rapport.with_suffix(".html")
+    from .parametres import charger as charger_parametres
+    rapport_web.write_text(rapport_html(client, f"{ip}:{port}", horodatage, journal, cfg.avertissements,
+                                        charger_parametres().get("societe", "")), encoding="utf-8")
     couleur = VERT if nb_ko == 0 else ROUGE
-    print(f"\n{couleur}Terminé : {nb_ok} réussi(s), {nb_ko} échec(s).{FIN} Rapport : {rapport}")
+    print(f"\n{couleur}Terminé : {nb_ok} réussi(s), {nb_ko} échec(s).{FIN} Rapport : {rapport_web}")
     if changement_ip:
         print(f"{JAUNE}L'IP du pare-feu est maintenant {changement_ip.contenu['IPAddress']} : "
               f"remettez votre PC en DHCP (automatique) s'il le faut.{FIN}")
@@ -412,6 +488,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--verifier-certificat", action="store_true", help="Refuser les certificats auto-signés")
     p.add_argument("--lire", metavar="TYPE", help="Affiche les objets existants d'un type (ex. IPHost, FirewallRule, Zone, VLAN, Interface)")
     p.add_argument("--continuer", action="store_true", help="Ne pas s'arrêter s'il y a des erreurs dans le fichier")
+    p.add_argument("--seulement", help="N'appliquer que ces onglets, séparés par des virgules (ex. Règles,Hôtes)")
+    p.add_argument("--prudent", action="store_true", help="Ne rien modifier de ce qui existe déjà (création seulement)")
+    p.add_argument("--debug", action="store_true", help="Enregistrer un journal technique (mots de passe masqués)")
     a = p.parse_args(argv)
 
     if a.lire:
@@ -430,6 +509,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{ROUGE}Fichier introuvable : {a.fichier}{FIN}")
         return 1
     return deployer(a.fichier, simulation=a.simulation, ip=a.ip, port=a.port, utilisateur=a.utilisateur,
+                    seulement=a.seulement.split(",") if a.seulement else None, sans_modifier=a.prudent, debug=a.debug,
                     verifier_certificat=a.verifier_certificat, continuer=a.continuer)
 
 
