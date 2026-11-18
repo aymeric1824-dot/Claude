@@ -19,7 +19,13 @@ Un outil pour configurer un pare-feu **Sophos XGS**, **même sans être expert**
 **Le plus simple — sans rien installer :**
 1. Téléchargez **SophosXGS.exe** depuis la page **Releases** du dépôt GitHub (dernière version, adresse fixe).
 2. Rangez-le dans un dossier à lui, par exemple `Documents\SophosXGS`, puis double-cliquez dessus. Une **fenêtre** s'ouvre : les actions sont à gauche, et vous répondez aux questions en bas (zone de saisie ou boutons Oui / Non / Valeur proposée / Aide). Le programme crée ses dossiers (`clients`, `rapports`, `sauvegardes`) à côté de lui.
-3. Il **se met à jour tout seul** : au démarrage, il signale une nouvelle version, et le bouton « Mise à jour du programme » l'installe.
+3. Il **se met à jour tout seul** : à chaque démarrage, il vérifie sur GitHub si une nouvelle version existe.
+   - Si oui, il la télécharge et contrôle son empreinte SHA-256 par rapport à celle publiée par GitHub.
+   - Il garde l'ancienne version en secours (`SophosXGS.ancien.exe`), installe la nouvelle et redémarre dessus.
+   - Si une action est en cours, il attend qu'elle se termine.
+   - Le fichier n'est jamais installé s'il est incomplet ou si son empreinte ne correspond pas.
+   - Vous pouvez désactiver l'installation automatique dans « Mes paramètres » : le programme vous prévient alors seulement.
+   - Sans Internet, rien ne change : le programme démarre normalement.
 
 `SophosXGS-console.exe` est le même outil en mode texte.
 
@@ -209,7 +215,7 @@ Sans la clé maître de stockage sécurisé (SSMK), les mots de passe et donnée
 | Modèles par métier | Assistant, question « Secteur d'activité » | Santé, cabinet, commerce, école, industrie : VLAN conseillés, réglages par défaut et points de vigilance dans la fiche |
 | Coffre KeePass | Fin de l'assistant | Tous les mots de passe du client dans un fichier `.kdbx` chiffré (KeePass ou KeePassXC) |
 | Glossaire | Menu, ou `?? mot` à n'importe quelle question | 48 termes expliqués simplement |
-| Mise à jour automatique | Menu « Mise à jour du programme » | Télécharge et installe la nouvelle version depuis GitHub |
+| Mise à jour automatique | Au démarrage, et menu « Mise à jour du programme » | Vérifie GitHub, télécharge, contrôle l'empreinte SHA-256, garde l'ancienne version en secours, installe et redémarre |
 
 Remarques :
 - **Licences** : l'API locale du pare-feu ne donne pas leur date d'expiration. Consultez-la dans Sophos Central.

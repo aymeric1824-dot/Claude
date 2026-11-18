@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import builtins
 import getpass
+import os
 import queue
 import re
 import sys
@@ -79,13 +80,12 @@ def _travail(action, sorties: queue.Queue, reponses: queue.Queue) -> None:
 
 
 def _verifier_mise_a_jour(sorties: queue.Queue) -> None:
+    """Au démarrage : cherche une nouvelle version sur GitHub et l'installe toute seule si c'est activé."""
     try:
-        from .mise_a_jour import verifier
-        nouvelle = verifier()
-        if nouvelle:
-            sorties.put(("texte", f"\x1b[33mNouvelle version {nouvelle['version']} disponible : bouton "
-                                  f"« Mise à jour du programme ».\x1b[0m\n"))
-    except Exception:
+        from .mise_a_jour import mise_a_jour_automatique
+        if mise_a_jour_automatique(lambda t: sorties.put(("texte", f"\x1b[33m{t}\x1b[0m\n"))):
+            sorties.put(("redemarrer", None))
+    except Exception:  # une vérification ratée ne doit jamais gêner l'utilisation
         pass
 
 
@@ -106,6 +106,7 @@ class Application:
         self.reponses: queue.Queue = queue.Queue()
         self.en_cours = False
         self.masque = False
+        self.redemarrage_en_attente = False
 
         gauche = tk.Frame(self.racine, bg="#1f4e78", padx=8, pady=8)
         gauche.pack(side="left", fill="y")
@@ -172,6 +173,8 @@ class Application:
                     self.attendre_reponse(masque=val)
                 elif genre == "fin":
                     self.fin_action()
+                elif genre == "redemarrer":
+                    self.redemarrer_apres_maj()
                 elif genre == "etat":
                     self.etat.configure(text=val)
         except queue.Empty:
@@ -213,6 +216,22 @@ class Application:
         for b in self.boutons:
             b.configure(state="normal")
         self.etat.configure(text="Terminé. Choisissez une autre action à gauche.")
+        if self.redemarrage_en_attente:
+            self.redemarrer_apres_maj()
+
+    def redemarrer_apres_maj(self):
+        """La nouvelle version est prête : on ferme (le script d'installation la relance), sans couper une action."""
+        if self.en_cours:
+            self.redemarrage_en_attente = True
+            self.etat.configure(text="Mise à jour prête : le programme redémarrera à la fin de l'action en cours.")
+            return
+        self.ecrire("\x1b[32mRedémarrage sur la nouvelle version...\x1b[0m\n")
+        self.racine.after(1500, self._fermer_pour_maj)
+
+    def _fermer_pour_maj(self):
+        self.reponses.put(None)
+        self.racine.destroy()
+        os._exit(0)
 
     def quitter(self):
         from tkinter import messagebox

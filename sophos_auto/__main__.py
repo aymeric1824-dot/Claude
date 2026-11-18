@@ -192,6 +192,10 @@ def action_parametres():
         "utilisateur_defaut": texte("Compte admin proposé par défaut", p["utilisateur_defaut"]),
         "fuseau_defaut": texte("Fuseau horaire par défaut", p["fuseau_defaut"]),
         "prefixe_admin": texte("Identifiant du compte administrateur nominatif proposé", p["prefixe_admin"]),
+        "mise_a_jour_auto": oui_non("Installer automatiquement les nouvelles versions au démarrage ?",
+                                    bool(p["mise_a_jour_auto"]),
+                                    "Oui : à chaque démarrage, le programme vérifie sur GitHub et s'installe tout seul "
+                                    "(fichier vérifié, ancienne version gardée en secours). Non : il vous prévient seulement."),
     })
     print(f"{G}✔ Paramètres enregistrés (parametres.json).{F}")
 
@@ -480,11 +484,10 @@ def main() -> int:
     if os.name == "nt":
         os.system("")
     try:
-        from .mise_a_jour import verifier
-        nouvelle = verifier(delai=3)
-        if nouvelle:
-            print(f"{J}Nouvelle version {nouvelle['version']} disponible : menu « Mise à jour du programme ».{F}")
-    except Exception:
+        from .mise_a_jour import mise_a_jour_automatique
+        if mise_a_jour_automatique(lambda t: print(f"{J}{t}{F}"), delai=3):
+            return 0          # la nouvelle version va démarrer à la place de celle-ci
+    except Exception:  # une vérification ratée ne doit jamais gêner l'utilisation
         pass
     for flux in (sys.stdout, sys.stderr):
         try:

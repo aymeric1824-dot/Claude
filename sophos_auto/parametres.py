@@ -18,6 +18,7 @@ DEFAUTS = {
     "fuseau_defaut": "Europe/Paris",
     "prefixe_admin": "admin-presta",   # identifiant proposé pour le compte administrateur nominatif
     "depot_mises_a_jour": "aymeric1824-dot/Claude",   # dépôt GitHub des nouvelles versions (vide = jamais)
+    "mise_a_jour_auto": True,      # installer seul les nouvelles versions au démarrage (sinon : simple message)
 }
 
 
