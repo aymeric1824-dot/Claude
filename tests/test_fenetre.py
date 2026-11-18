@@ -36,4 +36,8 @@ def test_fenetre_lance_une_action_et_repond(tmp_path, monkeypatch):
     assert pomper(lambda: str(app.saisie.cget("state")) == "normal")
     app.envoyer("")                                                       # retour au menu
     assert pomper(lambda: not app.en_cours)
+    time.sleep(0.2)                     # laisse finir le fil de l'action
     app.racine.destroy()
+    del app
+    import gc
+    gc.collect()                        # libère Tk dans le fil principal

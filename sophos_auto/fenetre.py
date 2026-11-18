@@ -50,6 +50,45 @@ class _Sortie:
         return False
 
 
+def _question(sorties: queue.Queue, reponses: queue.Queue, invite: str = "", masque: bool = False) -> str:
+    sorties.put(("texte", invite))
+    sorties.put(("question", masque))
+    rep = reponses.get()
+    if rep is None:
+        raise KeyboardInterrupt
+    return rep
+
+
+def _travail(action, sorties: queue.Queue, reponses: queue.Queue) -> None:
+    """Exécute une action du menu dans un fil séparé ; ses questions passent par la fenêtre."""
+    ancien_input, ancien_getpass, ancien_stdout = builtins.input, getpass.getpass, sys.stdout
+    builtins.input = lambda invite="": _question(sorties, reponses, invite)
+    getpass.getpass = lambda invite="Mot de passe : ", stream=None: _question(sorties, reponses, invite, masque=True)
+    sys.stdout = _Sortie(sorties)
+    try:
+        action()
+    except KeyboardInterrupt:
+        print("\nAction annulée.")
+    except SystemExit:
+        pass
+    except Exception as exc:  # une erreur ne doit jamais fermer la fenêtre
+        print(f"\n\x1b[31mErreur inattendue : {exc}\x1b[0m")
+    finally:
+        builtins.input, getpass.getpass, sys.stdout = ancien_input, ancien_getpass, ancien_stdout
+        sorties.put(("fin", None))
+
+
+def _verifier_mise_a_jour(sorties: queue.Queue) -> None:
+    try:
+        from .mise_a_jour import verifier
+        nouvelle = verifier()
+        if nouvelle:
+            sorties.put(("texte", f"\x1b[33mNouvelle version {nouvelle['version']} disponible : bouton "
+                                  f"« Mise à jour du programme ».\x1b[0m\n"))
+    except Exception:
+        pass
+
+
 class Application:
     def __init__(self):
         import tkinter as tk
@@ -112,7 +151,8 @@ class Application:
                     f"Astuce : tapez ?? suivi d'un mot (ex. ?? vlan) pour le glossaire.\n\n")
         self.racine.protocol("WM_DELETE_WINDOW", self.quitter)
         self.racine.after(50, self.relever)
-        threading.Thread(target=self._verifier_mise_a_jour, daemon=True).start()
+        # Les tâches de fond ne gardent jamais de référence à la fenêtre (Tk ne doit être libéré que par le fil principal)
+        threading.Thread(target=_verifier_mise_a_jour, args=(self.sorties,), daemon=True).start()
 
     # ------------------------------------------------------------------ affichage
     def ecrire(self, t: str):
@@ -157,14 +197,6 @@ class Application:
         self.reponses.put(valeur)
 
     # ------------------------------------------------------------------ actions
-    def _question(self, invite: str = "", masque: bool = False) -> str:
-        self.sorties.put(("texte", invite))
-        self.sorties.put(("question", masque))
-        rep = self.reponses.get()
-        if rep is None:
-            raise KeyboardInterrupt
-        return rep
-
     def lancer(self, action, libelle):
         if self.en_cours:
             return
@@ -174,39 +206,13 @@ class Application:
         self.etat.configure(text=f"En cours : {libelle}")
         self.ecrire(f"\n——— {libelle} ———\n")
 
-        def travail():
-            ancien_input, ancien_getpass, ancien_stdout = builtins.input, getpass.getpass, sys.stdout
-            builtins.input = lambda invite="": self._question(invite)
-            getpass.getpass = lambda invite="Mot de passe : ", stream=None: self._question(invite, masque=True)
-            sys.stdout = _Sortie(self.sorties)
-            try:
-                action()
-            except KeyboardInterrupt:
-                print("\nAction annulée.")
-            except SystemExit:
-                pass
-            except Exception as exc:  # une erreur ne doit jamais fermer la fenêtre
-                print(f"\n\x1b[31mErreur inattendue : {exc}\x1b[0m")
-            finally:
-                builtins.input, getpass.getpass, sys.stdout = ancien_input, ancien_getpass, ancien_stdout
-                self.sorties.put(("fin", None))
-        threading.Thread(target=travail, daemon=True).start()
+        threading.Thread(target=_travail, args=(action, self.sorties, self.reponses), daemon=True).start()
 
     def fin_action(self):
         self.en_cours = False
         for b in self.boutons:
             b.configure(state="normal")
         self.etat.configure(text="Terminé. Choisissez une autre action à gauche.")
-
-    def _verifier_mise_a_jour(self):
-        try:
-            from .mise_a_jour import verifier
-            nouvelle = verifier()
-            if nouvelle:
-                self.sorties.put(("texte", f"\x1b[33mNouvelle version {nouvelle['version']} disponible : bouton "
-                                           f"« Mise à jour du programme ».\x1b[0m\n"))
-        except Exception:
-            pass
 
     def quitter(self):
         from tkinter import messagebox
