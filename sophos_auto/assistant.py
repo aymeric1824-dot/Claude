@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .classeur import ecrire_classeur
+from .metiers import METIERS, VLAN_METIERS
 from .parametres import charger as charger_parametres
 from .schema import DEMANDER
 
@@ -41,6 +42,19 @@ class Retour(Exception):
 def _retour(rep: str) -> None:
     if rep in ("<", "<<"):
         raise Retour(rep == "<<")
+
+
+def _glossaire(rep: str) -> bool:
+    """« ?? mot » affiche la définition du mot ; renvoie True si c'était une recherche."""
+    if not rep.startswith("??"):
+        return False
+    from .glossaire import chercher
+    resultats = chercher(rep[2:])
+    if not resultats:
+        print(f"{J}   Aucun terme trouvé. Essayez par exemple : ?? dhcp, ?? vlan, ?? vpn{F}")
+    for terme, definition in resultats[:8]:
+        print(f"{C}   {B}{terme}{F}{C} : {definition}{F}")
+    return True
 
 
 # ============================================================================ questions
@@ -74,6 +88,8 @@ def texte(question: str, defaut: str = "", aide: str = "", valider=None, vide_ok
         d = f" [{defaut}]" if defaut else ""
         rep = _lire(f"{B}? {question}{F}{d} : ")
         _retour(rep)
+        if _glossaire(rep):
+            continue
         if rep == "?":
             print(f"{C}{_wrap(aide or 'Pas d’explication supplémentaire pour cette question.')}{F}")
             continue
@@ -94,6 +110,8 @@ def oui_non(question: str, defaut: bool = True, aide: str = "") -> bool:
     while True:
         rep = _lire(f"{B}? {question}{F} [{'O/n' if defaut else 'o/N'}] : ").lower()
         _retour(rep)
+        if _glossaire(rep):
+            continue
         if rep == "?":
             print(f"{C}{_wrap(aide or 'Pas d’explication supplémentaire.')}{F}")
             continue
@@ -114,6 +132,8 @@ def choix(question: str, options: list[tuple[str, str]], defaut: int = 1, aide: 
     while True:
         rep = _lire(f"   Votre choix [{defaut}] : ")
         _retour(rep)
+        if _glossaire(rep):
+            continue
         if rep == "?":
             print(f"{C}{_wrap(aide or 'Pas d’explication supplémentaire.')}{F}")
             continue
@@ -228,6 +248,8 @@ class Projet:
     vpn_sites: list[dict] = field(default_factory=list)       # pour les fiches « autre site »
     teletravailleurs: list[dict] = field(default_factory=list)  # pour les fiches utilisateurs
     situation: str = "autre"
+    metier: str = "general"
+    wan2_port: str = ""
     central: bool = False          # le client est géré dans Sophos Central
     zero_touch: bool = False       # le boîtier est préconfiguré par Central (Zero Touch)
     prochain_octet: int = 20
@@ -242,6 +264,11 @@ class Projet:
         if genere:
             self.generes.append((libelle, valeur))
         return DEMANDER
+
+
+def M(p: Projet, cle: str, defaut=False):
+    """Réglage conseillé pour le métier du client."""
+    return METIERS.get(p.metier, {}).get(cle, defaut)
 
 
 def _suivant_reseau(p: Projet) -> ipaddress.IPv4Interface:
@@ -316,7 +343,7 @@ def etape_intro(p: Projet) -> str:
          "À la fin, il crée un fichier Excel (modifiable), une fiche récapitulative, et peut appliquer la "
          "configuration sur le boîtier.")
     info("Règles : appuyez sur Entrée pour garder la valeur proposée entre [crochets]. Tapez ? à n'importe quelle "
-         "question pour avoir une explication. Tapez < pour recommencer l'étape en cours, << pour revenir à "
+         "question pour avoir une explication, ?? suivi d'un mot pour le glossaire (ex. ?? vlan). Tapez < pour recommencer l'étape en cours, << pour revenir à "
          "l'étape précédente. Vos réponses sont enregistrées après chaque étape : en cas d'interruption, vous "
          "pourrez reprendre. Ctrl+C pour quitter.")
     if oui_non("Afficher d'abord la liste des informations à demander au client ?", False,
@@ -336,6 +363,11 @@ def etape_intro(p: Projet) -> str:
     situation = choix("Quelle situation ressemble le plus à celle du client ?", SITUATIONS, 1,
                       "Votre réponse sert seulement à proposer les bons choix par défaut. Toutes les questions "
                       "utiles seront posées dans tous les cas.")
+    p.metier = choix("Quel est le secteur d'activité du client ?", [(k, v["libelle"]) for k, v in METIERS.items()], 1,
+                     "Le secteur sert à proposer les bons réglages (VLAN conseillés, filtrage, double authentification) "
+                     "et ajoute dans la fiche les points de vigilance propres au métier.")
+    for c in METIERS[p.metier]["conseils"]:
+        p.a_faire.append(c)
     if situation == "remplacement":
         conseil("Avant de débrancher l'ancien équipement, relevez son adresse IP côté LAN, ses redirections de "
                 "ports, ses VPN et s'il distribue les adresses (DHCP). En reprenant la même IP côté LAN, les PC "
@@ -407,6 +439,7 @@ def etape_internet(p: Projet, situation: str) -> None:
     if oui_non("Y a-t-il un DEUXIÈME accès Internet (4G, 2e fibre, ADSL) ?", False,
                "Le pare-feu peut basculer automatiquement sur le 2e lien en cas de panne, ou utiliser les deux en même temps."):
         port2 = port_reseau(texte("Port du XGS relié au 2e accès", "Port3", valider=_v_port))
+        p.wan2_port = port2
         mode2 = choix("Ce 2e lien est fourni :", [("DHCP", "Par une box ou un routeur 4G (adresse automatique)"),
                                                   ("Statique", "Avec une IP fixe"), ("PPPoE", "En PPPoE")], 1)
         l2 = {"Port": port2, "Zone": "WAN", "Mode": mode2, "Description": "Accès Internet secondaire"}
@@ -571,41 +604,53 @@ def etape_vlan(p: Projet, situation: str, dhcp_fw: bool) -> None:
         ("IOT", "Objets connectés / équipements techniques", False, False),
         ("AUTRE", "Autre (je donne le nom)", True, False),
     ]
-    vid = 10
+    modeles += [(k, v[0], v[1], v[2]) for k, v in VLAN_METIERS.items()]
+    vid = [10]
+    conseilles = [v for v in M(p, "vlans", []) if v in {m[0] for m in modeles}]
+    if conseilles and oui_non(f"Pour ce métier, on conseille les VLAN : {', '.join(conseilles)}. Les créer ?", True):
+        for c in conseilles:
+            _ajouter_vlan(p, next(x for x in modeles if x[0] == c), vid, dhcp_fw)
     while True:
         c = choix("Quel VLAN ajouter ?", [(m[0], m[1]) for m in modeles] + [("fin", "J'ai terminé")], len(modeles) + 1)
         if c == "fin":
             break
-        m = next(x for x in modeles if x[0] == c)
-        nom = c if c != "AUTRE" else texte("Nom du VLAN (ex. ATELIER)", valider=_v_nom).upper().replace(" ", "-")
-        vid = int(texte("Numéro de VLAN (le même que sur le switch)", str(vid),
-                        "Entre 1 et 4094. Demandez-le à la personne qui gère les switchs.",
-                        lambda t: None if t.isdigit() and 1 <= int(t) <= 4094 else "Nombre entre 1 et 4094."))
-        iface = ipaddress.IPv4Interface(texte(f"IP du pare-feu dans le VLAN {nom}, avec masque", str(_suivant_reseau(p)),
-                                              "Chaque VLAN est un réseau différent.", _v_iface))
-        interface = f"{p.lan_port}.{vid}"
-        p.ligne("Zones", Nom=nom, Type="LAN", Description=m[1], Ping="Oui", **{"Admin HTTPS": "Non"}, SSH="Non", DNS="Oui")
-        p.ligne("VLAN", **{"Interface physique": p.lan_port, "ID VLAN": vid, "Zone": nom, "Adresse IP": str(iface.ip),
-                           "Masque": str(iface.netmask), "Description": m[1]})
-        p.ligne("Hôtes", Nom=f"RES-{nom}", Type="Réseau", Adresse=str(iface.network.network_address),
-                **{"Masque / IP de fin": str(iface.netmask), "Description": f"VLAN {vid} {m[1]}"})
-        if dhcp_fw and oui_non(f"Le pare-feu distribue-t-il les adresses dans le VLAN {nom} ?", c != "SERVEURS"):
-            _dhcp_pour(p, f"DHCP-{nom}", interface, iface)
-        if oui_non(f"Le VLAN {nom} peut-il aller sur Internet ?", m[2]):
-            p.ligne("Règles", Nom=f"{nom} vers Internet", Action="Accepter", **{"Zones source": nom,
-                    "Réseaux source": f"RES-{nom}", "Zones destination": "WAN"}, Journaliser="Oui",
-                    **{"Filtrage web": "_WEB_", "IPS": "_IPS_"})
-        if oui_non(f"Les PC du réseau principal doivent-ils pouvoir joindre le VLAN {nom} ?", m[3]):
-            p.ligne("Règles", Nom=f"LAN vers {nom}", Action="Accepter", **{"Zones source": "LAN", "Réseaux source": "RES-LAN",
-                    "Zones destination": nom, "Réseaux destination": f"RES-{nom}"}, Journaliser="Oui")
-        if oui_non(f"Les équipements du VLAN {nom} doivent-ils pouvoir joindre le réseau principal ?", False,
-                   "Pour la sécurité, on répond non sauf besoin précis (ex. serveurs qui doivent joindre les PC)."):
-            p.ligne("Règles", Nom=f"{nom} vers LAN", Action="Accepter", **{"Zones source": nom, "Réseaux source": f"RES-{nom}",
-                    "Zones destination": "LAN", "Réseaux destination": "RES-LAN"}, Journaliser="Oui")
-        p.reseaux_internes.append(str(iface.network))
-        p.zones_internes.append(nom)
-        p.resume.append(f"VLAN {vid} {nom} : {iface}")
-        vid += 10
+        _ajouter_vlan(p, next(x for x in modeles if x[0] == c), vid, dhcp_fw)
+
+
+def _ajouter_vlan(p: Projet, m: tuple, vid: list, dhcp_fw: bool) -> None:
+    c = m[0]
+    nom = c if c != "AUTRE" else texte("Nom du VLAN (ex. ATELIER)", valider=_v_nom).upper().replace(" ", "-")
+    if any(z == nom for z in p.zones_internes):
+        print(f"{J}   Le VLAN {nom} existe déjà.{F}")
+        return
+    vid[0] = int(texte(f"Numéro du VLAN {nom} (le même que sur le switch)", str(vid[0]),
+                       "Entre 1 et 4094. Demandez-le à la personne qui gère les switchs.",
+                       lambda t: None if t.isdigit() and 1 <= int(t) <= 4094 else "Nombre entre 1 et 4094."))
+    iface = ipaddress.IPv4Interface(texte(f"IP du pare-feu dans le VLAN {nom}, avec masque", str(_suivant_reseau(p)),
+                                          "Chaque VLAN est un réseau différent.", _v_iface))
+    interface = f"{p.lan_port}.{vid[0]}"
+    p.ligne("Zones", Nom=nom, Type="LAN", Description=m[1], Ping="Oui", **{"Admin HTTPS": "Non"}, SSH="Non", DNS="Oui")
+    p.ligne("VLAN", **{"Interface physique": p.lan_port, "ID VLAN": vid[0], "Zone": nom, "Adresse IP": str(iface.ip),
+                       "Masque": str(iface.netmask), "Description": m[1]})
+    p.ligne("Hôtes", Nom=f"RES-{nom}", Type="Réseau", Adresse=str(iface.network.network_address),
+            **{"Masque / IP de fin": str(iface.netmask), "Description": f"VLAN {vid[0]} {m[1]}"})
+    if dhcp_fw and oui_non(f"Le pare-feu distribue-t-il les adresses dans le VLAN {nom} ?", c not in ("SERVEURS", "AUTOMATES")):
+        _dhcp_pour(p, f"DHCP-{nom}", interface, iface)
+    if oui_non(f"Le VLAN {nom} peut-il aller sur Internet ?", m[2]):
+        p.ligne("Règles", Nom=f"{nom} vers Internet", Action="Accepter", **{"Zones source": nom,
+                "Réseaux source": f"RES-{nom}", "Zones destination": "WAN"}, Journaliser="Oui",
+                **{"Filtrage web": "_WEB_", "IPS": "_IPS_"})
+    if oui_non(f"Les PC du réseau principal doivent-ils pouvoir joindre le VLAN {nom} ?", m[3]):
+        p.ligne("Règles", Nom=f"LAN vers {nom}", Action="Accepter", **{"Zones source": "LAN", "Réseaux source": "RES-LAN",
+                "Zones destination": nom, "Réseaux destination": f"RES-{nom}"}, Journaliser="Oui")
+    if oui_non(f"Les équipements du VLAN {nom} doivent-ils pouvoir joindre le réseau principal ?", False,
+               "Pour la sécurité, on répond non sauf besoin précis (ex. serveurs qui doivent joindre les PC)."):
+        p.ligne("Règles", Nom=f"{nom} vers LAN", Action="Accepter", **{"Zones source": nom, "Réseaux source": f"RES-{nom}",
+                "Zones destination": "LAN", "Réseaux destination": "RES-LAN"}, Journaliser="Oui")
+    p.reseaux_internes.append(str(iface.network))
+    p.zones_internes.append(nom)
+    p.resume.append(f"VLAN {vid[0]} {nom} : {iface}")
+    vid[0] += 10
 
 
 def etape_wifi(p: Projet) -> None:
@@ -622,7 +667,7 @@ def etape_wifi(p: Projet) -> None:
         p.ligne("Wi-Fi", Nom="WIFI-SALARIES", SSID=ssid, **{"Clé Wi-Fi": p.secret(f"Clé Wi-Fi ({ssid})", v, gen)},
                 Mode="Pont vers le LAN", **{"Isolation des clients": "Non", "SSID masqué": "Non"})
         p.resume.append(f"Wi-Fi salariés « {ssid} » (même réseau que le LAN)")
-    if oui_non("Créer un Wi-Fi invités (isolé, Internet uniquement) ?", True):
+    if oui_non("Créer un Wi-Fi invités (isolé, Internet uniquement) ?", M(p, "wifi_invites", True)):
         ssid = texte("Nom du Wi-Fi invités (SSID)", f"{_slug(p.general['Nom du client']).upper()}-INVITES")
         v, gen = mot_de_passe(f"Clé Wi-Fi ({ssid})")
         iface = ipaddress.IPv4Interface(texte("IP du pare-feu sur le Wi-Fi invités", "10.99.0.254/24",
@@ -769,11 +814,43 @@ def etape_vpn_sites(p: Projet, situation: str) -> None:
                          f"puis activer la connexion dans VPN > IPsec.")
 
 
+def etape_red(p: Projet) -> None:
+    if not oui_non("Des agences seront-elles reliées par un petit boîtier Sophos RED ?", False,
+                   "Le RED est un petit boîtier Sophos : branché sur Internet dans l'agence, il se connecte tout seul au "
+                   "pare-feu du siège, sans configuration sur place. Les PC de l'agence sont alors sur un réseau du siège."):
+        return
+    adresse = p.adresse_publique or texte("Adresse publique de ce pare-feu (IP ou nom DNS), que le RED contactera")
+    p.adresse_publique = adresse
+    while True:
+        nom = texte("Nom de l'agence (Entrée pour terminer)", "", vide_ok=True, valider=_v_nom)
+        if not nom:
+            break
+        nom = f"AGENCE-{nom.upper().replace(' ', '-')}"
+        modele = choix("Modèle du boîtier", [("RED15", "RED 15"), ("RED15W", "RED 15w (avec Wi-Fi)"), ("red20", "RED 20"),
+                                              ("RED50", "RED 50"), ("red60", "RED 60")], 1)
+        ident = texte("ID du RED (inscrit sous le boîtier)")
+        iface = ipaddress.IPv4Interface(texte(f"IP du pare-feu sur le réseau de {nom}", str(_suivant_reseau(p)),
+                                              "Le réseau de l'agence : différent de tous les autres.", _v_iface))
+        p.ligne("RED", Nom=nom, **{"Modèle": modele, "ID du RED": ident, "Adresse du pare-feu": adresse, "Zone": "LAN",
+                "Adresse IP": str(iface.ip), "Masque": str(iface.netmask)})
+        p.ligne("Hôtes", Nom=f"RES-{nom}", Type="Réseau", Adresse=str(iface.network.network_address),
+                **{"Masque / IP de fin": str(iface.netmask), "Description": f"Réseau de {nom} (RED)"})
+        p.ligne("Règles", Nom=f"{nom} vers siège", Action="Accepter", **{"Zones source": "LAN", "Réseaux source": f"RES-{nom}",
+                "Zones destination": "LAN", "Réseaux destination": "RES-LAN"}, Journaliser="Oui")
+        p.ligne("Règles", Nom=f"Siège vers {nom}", Action="Accepter", **{"Zones source": "LAN", "Réseaux source": "RES-LAN",
+                "Zones destination": "LAN", "Réseaux destination": f"RES-{nom}"}, Journaliser="Oui")
+        p.reseaux_internes.append(str(iface.network))
+        p.resume.append(f"Agence {nom} reliée par {modele} (réseau {iface.network})")
+        p.a_faire.append(f"RED {nom} : branchez le boîtier sur Internet dans l'agence ; il se connecte seul. Créez ensuite "
+                         f"le DHCP de l'agence sur l'interface RED (Réseau > Interfaces) et l'accès Internet de l'agence.")
+
+
 def etape_teletravail(p: Projet, situation: str) -> None:
     titre("11. VPN TÉLÉTRAVAIL")
     info("Le VPN télétravail permet à un salarié, depuis chez lui, d'accéder aux serveurs et fichiers de l'entreprise "
          "de façon sécurisée. Chaque personne a un identifiant et installe le logiciel Sophos Connect.")
-    if not oui_non("Des personnes doivent-elles se connecter à distance ?", situation in ("pme", "multi")):
+    if not oui_non("Des personnes doivent-elles se connecter à distance ?",
+                   M(p, "teletravail", situation in ("pme", "multi"))):
         return
     adresse = texte("Adresse publique du pare-feu (IP ou nom DNS)", p.adresse_publique,
                     "C'est l'adresse que les postes en télétravail contacteront.")
@@ -811,12 +888,105 @@ def etape_teletravail(p: Projet, situation: str) -> None:
         p.ligne("Comptes", Identifiant=ident, **{"Nom complet": nom}, Type="Utilisateur", **{"E-mail": mail,
                 "Mot de passe": p.secret(f"Mot de passe du compte {ident}", v, gen), "VPN télétravail": "Oui"})
         p.teletravailleurs.append({"identifiant": ident, "nom": nom, "email": mail})
+    if oui_non("Exiger la double authentification (code sur téléphone) pour le VPN ?", True,
+               "Fortement conseillé : un mot de passe volé ne suffit plus. Chaque personne installe une application "
+               "(Sophos Intercept X, Google ou Microsoft Authenticator) et scanne un QR code depuis le portail "
+               "utilisateur lors de sa première connexion."):
+        p.general["Double authentification VPN"] = "Oui"
+        p.resume.append("Double authentification exigée pour le VPN télétravail")
+        p.infos_client.append("Double authentification : à la première connexion au portail utilisateur, chaque "
+                              "télétravailleur scanne le QR code avec son application d'authentification.")
     nb = sum(1 for c in p.lignes.get("Comptes", []) if c.get("VPN télétravail") == "Oui")
     p.resume.append(f"VPN télétravail (SSL VPN) : {nb} compte(s), accès à {reseaux}")
     p.infos_client.append("Télétravail : chaque personne installe Sophos Connect, se connecte au portail utilisateur "
                           "du pare-feu avec son identifiant pour récupérer sa configuration VPN, puis l'importe.")
     p.a_faire.append("VPN télétravail : testez une connexion depuis l'extérieur (partage de connexion d'un téléphone) "
                      "avec un des comptes créés.")
+
+
+UE = ("Austria;Belgium;Bulgaria;Croatia;Cyprus;Czech Republic;Denmark;Estonia;Finland;France;Germany;Greece;Hungary;"
+      "Ireland;Italy;Latvia;Lithuania;Luxembourg;Malta;Netherlands;Poland;Portugal;Romania;Slovakia;Slovenia;Spain;Sweden")
+
+
+def etape_securite_avancee(p: Projet) -> None:
+    titre("SÉCURITÉ AVANCÉE")
+    if p.lignes.get("Redirections") and oui_non(
+            "Limiter les accès depuis Internet (redirections) à certains pays ?", M(p, "pays"),
+            "Les connexions vers les équipements publiés ne seront acceptées que depuis les pays choisis : cela "
+            "bloque la grande majorité des attaques automatiques venant de l'étranger."):
+        c = choix("Quels pays autoriser ?", [("fr", "France uniquement"),
+                                            ("voisins", "France et pays voisins"),
+                                            ("ue", "Union européenne"), ("autre", "Je donne la liste")], 1)
+        p.general["Pays autorisés depuis Internet"] = {
+            "fr": "France", "voisins": "France;Belgium;Luxembourg;Germany;Switzerland;Italy;Spain;Andorra;Monaco",
+            "ue": UE}.get(c) or texte("Pays autorisés, noms anglais séparés par ; (ex. France;Belgium)")
+        p.resume.append("Accès depuis Internet limités aux pays : " + p.general["Pays autorisés depuis Internet"].replace(";", ", "))
+    if oui_non("Bloquer tout le trafic venant de certains pays ?", False,
+               "Utile si le client n'a aucune relation avec certains pays. Les noms sont en anglais, comme dans "
+               "Hôtes et services > Groupes de pays du pare-feu."):
+        p.general["Pays bloqués"] = texte("Pays à bloquer, noms anglais séparés par ;")
+        p.resume.append("Pays bloqués : " + p.general["Pays bloqués"].replace(";", ", "))
+    if oui_non("Analyser aussi le trafic chiffré (inspection HTTPS) ?", M(p, "inspection"),
+               "Sans inspection, le filtrage web et l'antivirus ne voient pas le contenu des sites en HTTPS (la "
+               "majorité). Contrainte : le certificat du pare-feu doit être installé sur tous les postes (par GPO avec "
+               "un Active Directory), sinon les utilisateurs auront des alertes. Les banques et sites de santé sont "
+               "exclus d'office par Sophos."):
+        p.general["Inspection HTTPS activée"] = "Oui"
+        p.resume.append("Inspection HTTPS des postes du LAN")
+        p.a_faire.append("Inspection HTTPS : téléchargez le certificat du pare-feu (Certificats > Autorités de "
+                         "certification > Télécharger) et installez-le sur tous les postes (GPO ou à la main), AVANT "
+                         "d'activer la règle INSPECTION-HTTPS.")
+    if oui_non("Exiger aussi un code (double authentification) pour administrer le pare-feu ?", False,
+               "Très conseillé, mais à activer en dernier : ce programme ne pourra plus se connecter au pare-feu sans "
+               "code. Le réglage est donc appliqué à la toute fin."):
+        p.general["Double authentification administrateurs"] = "Oui"
+        p.a_faire.append("Double authentification des administrateurs : à la prochaine connexion, scannez le QR code "
+                         "avec votre application d'authentification. Gardez le compte « admin » en secours.")
+
+
+def etape_priorites(p: Projet) -> None:
+    voix = "TELEPHONIE" in p.zones_internes
+    if not voix and not p.wan2_port:
+        return
+    titre("PRIORITÉS ET LIENS INTERNET")
+    if voix and oui_non("Donner la priorité à la téléphonie et à la visio sur la bande passante ?", True,
+                        "Les appels restent nets même quand quelqu'un télécharge un gros fichier. On réserve un débit "
+                        "minimum à la téléphonie."):
+        garanti = texte("Débit réservé à la téléphonie, en Ko/s", "256",
+                        "Environ 12 Ko/s par appel simultané. 256 Ko/s ≈ 20 appels.",
+                        lambda t: None if t.isdigit() and int(t) >= 2 else "Nombre attendu.")
+        maxi = texte("Débit maximum de la téléphonie, en Ko/s", str(max(int(garanti) * 4, 1024)),
+                     valider=lambda t: None if t.isdigit() and int(t) > int(garanti) else "Doit dépasser le débit réservé.")
+        p.ligne("Priorités", Nom="PRIORITE-VOIX", **{"Priorité": "Temps réel", "Garanti (Ko/s)": garanti,
+                "Maximum (Ko/s)": maxi, "Description": "Téléphonie et visio"})
+        for r in p.lignes.get("Règles", []):
+            if r.get("Nom") == "TELEPHONIE vers Internet":
+                r["Priorité (QoS)"] = "PRIORITE-VOIX"
+        p.resume.append(f"Priorité de débit pour la téléphonie ({garanti} Ko/s réservés)")
+    if p.wan2_port and voix and oui_non(
+            f"Faire passer la téléphonie par le lien {p.wan_port}, et basculer sur {p.wan2_port} en cas de panne ?", True,
+            "C'est du SD-WAN : on choisit quel lien Internet utilise quel trafic."):
+        p.ligne("SD-WAN", Nom="VOIX-LIEN-PRINCIPAL", **{"Réseaux source": "RES-TELEPHONIE",
+                "Passerelle principale": f"{p.wan_port}_GW", "Passerelle de secours": f"{p.wan2_port}_GW"})
+        p.resume.append(f"SD-WAN : téléphonie sur {p.wan_port}, secours sur {p.wan2_port}")
+        p.a_faire.append("SD-WAN : vérifiez dans Routage > Passerelles que les passerelles s'appellent bien "
+                         f"{p.wan_port}_GW et {p.wan2_port}_GW (le script le contrôle avant d'appliquer).")
+
+
+def etape_haute_dispo(p: Projet) -> None:
+    if not oui_non("Le client aura-t-il deux pare-feux identiques en haute disponibilité ?", False,
+                   "Deux XGS du même modèle, même firmware et mêmes licences, reliés par un câble direct. Si l'un tombe "
+                   "en panne, l'autre prend le relais en quelques secondes."):
+        return
+    port = port_reseau(texte("Port qui relie directement les deux pare-feux", "Port8",
+                             "Un port libre, identique sur les deux boîtiers, relié par un câble direct.", _v_port))
+    v, gen = mot_de_passe("Phrase secrète de la haute disponibilité", "Identique sur les deux pare-feux.")
+    p.general.update({"Rôle haute disponibilité": "Principal", "Port de liaison HA": port,
+                      "Phrase secrète HA": p.secret("Phrase secrète de la haute disponibilité", v, gen)})
+    p.resume.append(f"Haute disponibilité actif-passif (ce pare-feu = principal, liaison {port})")
+    p.a_faire.append(f"Haute disponibilité : sur le 2e pare-feu (même modèle et firmware), faites l'assistant de "
+                     f"démarrage, activez l'API, puis appliquez le fichier « _secondaire » créé avec celui-ci : il ne "
+                     f"règle que la HA. Reliez les deux {port} avant.")
 
 
 def etape_administration(p: Projet) -> None:
@@ -985,6 +1155,25 @@ def etape_fin(p: Projet) -> None:
         fiche += ["", "Mots de passe générés : affichés une seule fois à l'écran, NON enregistrés dans ce fichier."]
     Path(f"{base}_fiche.txt").write_text("\n".join(fiche) + "\n", encoding="utf-8")
     fiches = ecrire_fiches_annexes(p, base)
+    if p.general.get("Rôle haute disponibilité") == "Principal":
+        from .schema import GENERAL
+        nom_fw = p.general.get("Nom d'hôte du pare-feu") or "fw"
+        sec = {k: "" for k, *_ in GENERAL if not k.startswith("▸")}
+        sec.update({"Nom du client": f"{client} (pare-feu secondaire)", "Fuseau horaire": "",
+                    "Rôle haute disponibilité": "Secondaire", "Port de liaison HA": p.general["Port de liaison HA"],
+                    "Phrase secrète HA": DEMANDER, "Adresse IP du pare-feu": "172.16.16.16", "Port d'administration": "4444",
+                    "Utilisateur admin": "admin", "Nom d'hôte du pare-feu": f"{nom_fw}-2"})
+        ecrire_classeur(f"{base}_secondaire.xlsx", sec, {})
+        fiches.append(f"{base}_secondaire.xlsx  (à appliquer sur le 2e pare-feu : haute disponibilité seulement)")
+    if p.secrets and oui_non("Enregistrer tous les mots de passe dans un coffre-fort KeePass chiffré (.kdbx) ?", True,
+                             "Crée un fichier KeePass protégé par un mot de passe principal, que vous ouvrez avec "
+                             "KeePass ou KeePassXC. Plus besoin de noter les mots de passe à la main."):
+        try:
+            from .coffre import creer_coffre
+            principal, _ = mot_de_passe("Mot de passe principal du coffre", generer_ok=False)
+            fiches.append(f"{creer_coffre(f'{base}.kdbx', principal, client, p.secrets)}  (coffre-fort KeePass chiffré)")
+        except Exception as exc:  # pragma: no cover - dépend de la bibliothèque installée
+            print(f"{J}  Coffre KeePass non créé : {exc}{F}")
 
     print(f"\n{G}Fichiers créés :{F}\n  - {xlsx}  (configuration, modifiable dans Excel)\n  - {base}_fiche.txt  (récapitulatif et étapes manuelles)")
     for f in fiches:
@@ -1108,7 +1297,11 @@ ETAPES = [
     ("Protections", etape_securite),
     ("Accès depuis Internet", etape_redirections),
     ("VPN entre sites", lambda p: etape_vpn_sites(p, p.situation)),
+    ("Agences RED", etape_red),
     ("Télétravail", lambda p: etape_teletravail(p, p.situation)),
+    ("Sécurité avancée", etape_securite_avancee),
+    ("Priorités et liens", etape_priorites),
+    ("Haute disponibilité", etape_haute_dispo),
     ("Administration", etape_administration),
 ]
 DOSSIER_BROUILLONS = Path("clients") / "brouillons"

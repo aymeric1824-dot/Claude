@@ -1,7 +1,18 @@
-"""Point d'entrée du programme Windows (SophosXGS.exe)."""
+"""Point d'entrée de SophosXGS.exe : la fenêtre, ou le mode texte avec --console."""
 import sys
 
-from sophos_auto.__main__ import main
+
+def principal() -> int:
+    if "--console" not in sys.argv:
+        try:
+            from sophos_auto.fenetre import main as fenetre
+            return fenetre()
+        except Exception:   # pas d'affichage graphique disponible : mode texte
+            if sys.stdout is None:
+                raise
+    from sophos_auto.__main__ import main
+    return main()
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(principal())

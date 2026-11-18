@@ -16,33 +16,69 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest
-      - run: python -m pytest -q
+      - run: python -m pytest -q -rs
 
   windows:
     needs: tests
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pyinstaller
-      - name: Construire SophosXGS.exe
-        run: pyinstaller --onefile --console --name SophosXGS lanceur.py
+      - id: version
+        shell: bash
+        run: echo "version=$(python -c 'import sophos_auto; print(sophos_auto.__version__)')" >> "$GITHUB_OUTPUT"
+      - name: Construire SophosXGS.exe (fenêtre) et SophosXGS-console.exe (mode texte)
+        shell: bash
+        run: |
+          pyinstaller --onefile --windowed --name SophosXGS --collect-all pykeepass lanceur.py
+          pyinstaller --onefile --console --name SophosXGS-console --collect-all pykeepass lanceur_console.py
       - name: Vérifier que le programme démarre
         shell: bash
         run: |
           cd dist
-          printf 'q\n' | ./SophosXGS.exe > sortie.txt 2>&1 || true
+          printf 'q\n' | ./SophosXGS-console.exe > sortie.txt 2>&1 || true
           cat sortie.txt
           grep -q "OUTIL DE CONFIGURATION" sortie.txt
           rm sortie.txt
+          test -s SophosXGS.exe
       - name: Préparer le dossier à télécharger
         shell: bash
         run: |
           mkdir SophosXGS
-          cp dist/SophosXGS.exe modele_client.xlsx README.md SophosXGS/
+          cp dist/SophosXGS.exe dist/SophosXGS-console.exe modele_client.xlsx README.md SophosXGS/
       - uses: actions/upload-artifact@v4
         with:
           name: SophosXGS-windows
           path: SophosXGS/
+
+  publication:
+    # Publie la version sur GitHub (page « Releases ») : c'est là que la mise à jour automatique la trouve.
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: SophosXGS-windows
+          path: SophosXGS
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.windows.outputs.version }}
+          name: SophosXGS ${{ needs.windows.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            Programme Windows de l'outil de configuration Sophos XGS.
+            - SophosXGS.exe : la fenêtre (à utiliser au quotidien)
+            - SophosXGS-console.exe : le même outil en mode texte
+            Les versions déjà installées se mettent à jour depuis le menu « Mise à jour du programme ».
+          files: |
+            SophosXGS/SophosXGS.exe
+            SophosXGS/SophosXGS-console.exe
+            SophosXGS/modele_client.xlsx

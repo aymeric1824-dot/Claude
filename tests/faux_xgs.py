@@ -7,7 +7,8 @@ import requests
 import xmltodict
 
 SINGLETONS = {"AdminSettings", "Time", "DNS", "Notification", "BackupRestore", "SNMPAgentConfiguration",
-              "SSLTunnelAccessSettings", "GatewayConfiguration", "HBCloudRegistration", "EnableCloudCentralManagement"}
+              "SSLTunnelAccessSettings", "GatewayConfiguration", "HBCloudRegistration", "EnableCloudCentralManagement",
+              "OTPSettings", "HAConfigure", "SSLTLSInspectionSettings"}
 
 
 def cle(balise, contenu):
@@ -49,6 +50,8 @@ class FauxXGS:
         self._mettre("ApplicationFilterPolicy", {"Name": "Block generally unwanted apps"})
         self._mettre("VPNProfile", {"Name": "IKEv2"})
         self.objets["SSLTunnelAccessSettings"] = {"": {"Protocol": "TCP", "Port": "8443", "SSLServerCertificate": "ApplianceCertificate"}}
+        self.objets["SSLTLSInspectionSettings"] = {"": {"RSACA": "SecurityAppliance_SSL_CA", "SSLTLSEngine": "Disabled",
+                                                       "SSLTLSInspection": "Disabled"}}
         self.objets["GatewayConfiguration"] = {"": {"GatewayFailoverTimeout": "60", "Gateway": [
             {"Name": "Port2_GW", "Type": "Active"}, {"Name": "Port3_GW", "Type": "Active"}]}}
 

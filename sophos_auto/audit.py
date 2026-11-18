@@ -220,6 +220,36 @@ def auditer(api: SophosAPI) -> list[Constat]:
                          "Impossible de savoir qui a fait quelle modification.",
                          "Créez un compte administrateur nominatif par technicien."))
 
+    # ---- VPN : profils de chiffrement faibles, double authentification
+    utilises = {((v.get("Configuration") or {}).get("Policy")) for v in lire("VPNIPSecConnection")}
+    for prof in lire("VPNProfile"):
+        if prof.get("Name") not in utilises:
+            continue
+        faibles = set()
+        for phase in ("Phase1", "Phase2"):
+            ph = prof.get(phase) or {}
+            for k, v in ph.items():
+                if k.startswith(("EncryptionAlgorithm", "AuthenticationAlgorithm")) and str(v).upper() in (
+                        "DES", "3DES", "MD5", "NULL"):
+                    faibles.add(str(v))
+            for dh in _valeurs(ph.get("SupportedDHGroups"), "DHGroup"):
+                if dh.split("(")[0] in ("1", "2", "5"):
+                    faibles.add(f"DH {dh}")
+        if faibles:
+            c.append(Constat(ATTENTION, f"Chiffrement VPN dépassé : profil « {prof.get('Name')} »",
+                             f"Algorithmes faibles utilisés : {', '.join(sorted(faibles))}.",
+                             "Passez sur un profil IKEv2 avec AES-256, SHA-256 et un groupe DH 14 ou plus (des deux côtés)."))
+    otp = next(iter(lire("OTPSettings")), {})
+    vpn_nomade = bool(lire("SSLVPNPolicy"))
+    if vpn_nomade and str(otp.get("otpSSLVPN", "0")) != "1":
+        c.append(Constat(ATTENTION, "VPN télétravail sans double authentification",
+                         "Un mot de passe volé suffit pour entrer dans le réseau de l'entreprise.",
+                         "Activez les codes à usage unique pour le VPN (Authentification > Mot de passe à usage unique)."))
+    if str(otp.get("otpWebAdmin", "0")) != "1":
+        c.append(Constat(INFO, "Administration sans double authentification",
+                         "L'accès à l'administration du pare-feu ne demande qu'un mot de passe.",
+                         "Activez les codes à usage unique pour les administrateurs une fois la configuration terminée."))
+
     if not any(x.niveau == CRITIQUE for x in c):
         c.append(Constat(INFO, "Aucun problème critique détecté", "Les contrôles critiques sont passés.", "—"))
     return sorted(c, key=lambda x: ORDRE[x.niveau])

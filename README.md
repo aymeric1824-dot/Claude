@@ -17,8 +17,11 @@ Un outil pour configurer un pare-feu **Sophos XGS**, **même sans être expert**
 ## 1. Installation (une seule fois sur le PC)
 
 **Le plus simple — sans rien installer :**
-1. Téléchargez le programme Windows `SophosXGS.exe` : sur GitHub, onglet **Actions**, dernière exécution réussie de « Tests et programme Windows », section **Artifacts**, fichier **SophosXGS-windows**.
-2. Décompressez-le, puis double-cliquez sur **SophosXGS.exe**. Le programme crée ses dossiers (`clients`, `rapports`, `sauvegardes`) à côté de lui.
+1. Téléchargez **SophosXGS.exe** depuis la page **Releases** du dépôt GitHub (dernière version, adresse fixe).
+2. Rangez-le dans un dossier à lui, par exemple `Documents\SophosXGS`, puis double-cliquez dessus. Une **fenêtre** s'ouvre : les actions sont à gauche, et vous répondez aux questions en bas (zone de saisie ou boutons Oui / Non / Valeur proposée / Aide). Le programme crée ses dossiers (`clients`, `rapports`, `sauvegardes`) à côté de lui.
+3. Il **se met à jour tout seul** : au démarrage, il signale une nouvelle version, et le bouton « Mise à jour du programme » l'installe.
+
+`SophosXGS-console.exe` est le même outil en mode texte.
 
 **Ou avec Python :**
 
@@ -188,6 +191,29 @@ Sans la clé maître de stockage sécurisé (SSMK), les mots de passe et donnée
 2. « Copier le pare-feu modèle » pour vos standards.
 3. L'assistant pour les spécificités du client.
 
+## Nouveautés de la version 5
+
+| Fonction | Où | Ce que ça fait |
+|---|---|---|
+| Fenêtre Windows | SophosXGS.exe | Boutons, couleurs et zone de réponse, à la place du terminal |
+| Blocage par pays | Assistant « Sécurité avancée », onglet Général | Accès depuis Internet limités à la France, aux pays voisins ou à l'UE ; blocage complet de certains pays |
+| Double authentification | Assistant « Télétravail » et « Sécurité avancée » | Code sur téléphone pour le VPN, et pour les administrateurs (appliqué en tout dernier) |
+| Inspection HTTPS | Assistant « Sécurité avancée » | Règle de déchiffrement des postes du LAN. Les banques et sites de santé sont exclus par Sophos. Rappel pour installer le certificat sur les postes |
+| Haute disponibilité | Assistant « Haute disponibilité » | Ce pare-feu en principal, plus un fichier `_secondaire.xlsx` à appliquer sur le second |
+| SD-WAN | Onglet SD-WAN | Téléphonie sur le lien principal, bascule automatique sur le lien de secours |
+| Priorité de débit | Onglet Priorités, colonne « Priorité (QoS) » des règles | Débit réservé à la téléphonie et à la visio |
+| Boîtiers RED | Onglet RED, assistant « Agences RED » | Agences reliées par un RED, avec les règles siège ⇄ agence |
+| Contrôles de sécurité | Menu Contrôle de sécurité | Profils VPN dépassés (DES, 3DES, MD5, DH 1/2/5) ; VPN et administration sans double authentification |
+| Modèles par métier | Assistant, question « Secteur d'activité » | Santé, cabinet, commerce, école, industrie : VLAN conseillés, réglages par défaut et points de vigilance dans la fiche |
+| Coffre KeePass | Fin de l'assistant | Tous les mots de passe du client dans un fichier `.kdbx` chiffré (KeePass ou KeePassXC) |
+| Glossaire | Menu, ou `?? mot` à n'importe quelle question | 50 termes expliqués simplement |
+| Mise à jour automatique | Menu « Mise à jour du programme » | Télécharge et installe la nouvelle version depuis GitHub |
+
+Remarques :
+- **Licences** : l'API locale du pare-feu ne donne pas leur date d'expiration. Consultez-la dans Sophos Central.
+- **Noms de pays** : en anglais, comme dans le pare-feu (Hôtes et services > Groupes de pays).
+- **À vérifier lors du premier essai sur un vrai boîtier** : les nouvelles fonctions (HA, RED, SD-WAN, inspection HTTPS) utilisent le format de la documentation officielle de l'API v21.
+
 ## Nouveautés de la version 4
 
 **Contrôles du fichier, avant tout envoi :**
@@ -279,6 +305,9 @@ Restent **manuels**, et sont rappelés dans la fiche :
 | Fichier | Rôle |
 |---|---|
 | `sophos_auto/__main__.py` | Le menu principal |
+| `sophos_auto/fenetre.py` | La fenêtre Windows |
+| `sophos_auto/metiers.py`, `glossaire.py` | Modèles par métier, glossaire |
+| `sophos_auto/coffre.py`, `mise_a_jour.py` | Coffre KeePass, mise à jour automatique |
 | `sophos_auto/assistant.py` | L'assistant pas à pas |
 | `sophos_auto/audit.py` | Contrôle de sécurité et rapport HTML |
 | `sophos_auto/diagnostic.py` | Diagnostic de connexion |

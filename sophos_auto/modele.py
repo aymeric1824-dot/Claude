@@ -254,7 +254,8 @@ def _contenu_service(nom: str, proto: str, ports: list[str]) -> dict:
 # ----------------------------------------------------------------------------- règles et NAT (partagés)
 def regle(cfg: Configuration, onglet: str, ligne: int, nom: str, *, action="Accept",
           zones_src=(), reseaux_src=(), zones_dst=(), reseaux_dst=(), services=(),
-          journal=True, web="", appli="", ips="", antivirus=False, description="") -> Operation:
+          journal=True, web="", appli="", ips="", antivirus=False, description="", qos="",
+          position="Bottom") -> Operation:
     zs, zd = list(zones_src), list(zones_dst)
     rs = [cfg.reseau(r, onglet, ligne) for r in reseaux_src]
     rd = [cfg.reseau(r, onglet, ligne) for r in reseaux_dst]
@@ -279,10 +280,12 @@ def regle(cfg: Configuration, onglet: str, ligne: int, nom: str, *, action="Acce
         p["ApplicationControl"] = appli
     if ips:
         p["IntrusionPrevention"] = ips
+    if qos:
+        p["TrafficShapingPolicy"] = qos
     contenu = {"Name": nom, "Description": description, "IPFamily": "IPv4", "Status": "Enable",
-               "Position": "Bottom", "PolicyType": "Network", "NetworkPolicy": p}
+               "Position": position, "PolicyType": "Network", "NetworkPolicy": p}
     refs = [("zone", z) for z in zs + zd] + [("reseau", r) for r in rs + rd] + [("service", s) for s in sv]
-    refs += [(t, n) for t, n in (("webfilter", web), ("appfilter", appli), ("ips", ips)) if n]
+    refs += [(t, n) for t, n in (("webfilter", web), ("appfilter", appli), ("ips", ips), ("qos", qos)) if n]
     return cfg.ajouter(Operation(onglet, ligne, nom, "FirewallRule", contenu, ETAPES["règles"], refs=refs), "regle")
 
 
@@ -564,6 +567,9 @@ def _redirections(cfg, c, onglet, ligne):
     ip_wan = f"#{port_wan}"   # objet système : IP de l'interface WAN
     zone = _txt(c["Zone du serveur"]) or "LAN"
     sources = _liste(c["Sources autorisées"])
+    if not sources and cfg.general.get("Pays autorisés depuis Internet"):
+        sources = [groupe_pays(cfg, "PAYS-AUTORISES", cfg.general["Pays autorisés depuis Internet"],
+                               "Pays autorisés à joindre les services publiés")]
     nat: dict = {"Name": nom, "Description": f"Redirection vers {serveur_txt}", "IPFamily": "IPv4", "Status": "Enable",
                  "Position": "Top"}
     if sources:
@@ -589,14 +595,85 @@ def _regles(cfg, c, onglet, ligne):
           zones_dst=_liste(c["Zones destination"]), reseaux_dst=_liste(c["Réseaux destination"]),
           services=_liste(c["Services"]), journal=_oui(c["Journaliser"], True),
           web=_txt(c["Filtrage web"]), appli=_txt(c["Contrôle d'applications"]), ips=_txt(c["IPS"]),
-          antivirus=_oui(c["Antivirus"]), description=_txt(c["Description"]))
+          antivirus=_oui(c["Antivirus"]), description=_txt(c["Description"]), qos=_txt(c.get("Priorité (QoS)")))
+
+
+def groupe_pays(cfg: Configuration, nom: str, liste: str, description: str) -> str:
+    """Crée (une seule fois) un groupe de pays utilisable comme réseau dans les règles."""
+    if not cfg.defini("reseau", nom):
+        pays = _liste(liste)
+        if not pays:
+            raise ErreurLigne(f"{nom} : aucun pays indiqué")
+        cfg.ajouter(Operation("Général", 0, nom, "CountryGroup", {"Name": nom, "Description": description,
+                                                                   "CountryList": {"Country": pays}},
+                              ETAPES["hôtes"], conseil_echec="vérifiez l'orthographe des pays (noms anglais, comme dans "
+                              "Hôtes et services > Groupes de pays)"), "reseau")
+    return nom
+
+
+def _sdwan(cfg, c, onglet, ligne):
+    nom, gw = _txt(c["Nom"]), _txt(c["Passerelle principale"])
+    if not gw:
+        raise ErreurLigne("passerelle principale manquante (ex. Port2_GW)")
+    contenu: dict = {"Name": nom, "Description": "Créé par sophos_auto", "IPFamily": "0"}
+    sources = [cfg.reseau(r, onglet, ligne) for r in _liste(c["Réseaux source"])]
+    services = [cfg.service(x, ligne) for x in _liste(c["Services"])]
+    if sources:
+        contenu["SourceNetworks"] = {"Network": sources}
+    if services:
+        contenu["Services"] = {"Service": services}
+    contenu.update(LinkSelection="SelectGateways", Gateway=gw)
+    secours = _txt(c["Passerelle de secours"])
+    if secours:
+        contenu["BackupGateway"] = secours
+    refs = [("passerelle", gw)] + ([("passerelle", secours)] if secours else [])
+    refs += [("reseau", r) for r in sources] + [("service", x) for x in services]
+    cfg.ajouter(Operation(onglet, ligne, nom, "SDWANPolicyRoute", contenu, ETAPES["routes"] + 1, refs=refs))
+
+
+PRIORITES = {"Temps réel": "RealTime", "Temps reel": "RealTime", "Critique": "BusinessCritical",
+             "Normale": "Normal3", "Faible": "BestEffort"}
+
+
+def _priorites(cfg, c, onglet, ligne):
+    nom = _txt(c["Nom"])
+    prio = _choix(c["Priorité"], PRIORITES, "priorité", "RealTime")
+    contenu = {"Name": nom, "PolicyBasedOn": "Firewall", "PolicyType": "Committed", "ImplementationOn": "Total",
+               "Priority": prio, "BandwidthUsageType": "Shared"}
+    g, m = _txt(c["Garanti (Ko/s)"]), _txt(c["Maximum (Ko/s)"])
+    if not (g.isdigit() and m.isdigit()):
+        raise ErreurLigne("indiquez les débits garanti et maximum en Ko/s (nombres entiers)")
+    if not 2 <= int(g) < int(m) <= 2560000:
+        raise ErreurLigne("le débit maximum doit être supérieur au débit garanti (2 à 2 560 000 Ko/s)")
+    contenu.update(GuaranteedBandwidth=g, BurstableBandwidth=m, Description=_txt(c["Description"]))
+    cfg.ajouter(Operation(onglet, ligne, nom, "QoSPolicy", contenu, ETAPES["services"]), "qos")
+
+
+def _red(cfg, c, onglet, ligne):
+    nom, ident = _txt(c["Nom"]), _txt(c["ID du RED"])
+    if not ident:
+        raise ErreurLigne("ID du RED manquant (inscrit sous le boîtier)")
+    adresse = _txt(c["Adresse du pare-feu"])
+    if not adresse:
+        raise ErreurLigne("adresse du pare-feu manquante (IP publique ou nom DNS)")
+    ip, masque = _ip_masque(c["Adresse IP"], c["Masque"])
+    zone = _txt(c["Zone"]) or "LAN"
+    contenu = {"Status": "Enable", "BranchName": nom, "Device": _txt(c["Modèle"]) or "RED15", "REDDeviceID": ident,
+               "UTMHostName": adresse, "Description": f"Agence {nom}", "DeploymentMode": "AutoDeployment",
+               "UplinkSettings": {"Uplink": {"Connection": "DHCP"}}, "Authorized": "1",
+               "NetworkSetting": {"OperationMode": "Standard", "IPAddress": ip, "NetMask": masque, "Zone": zone,
+                                  "TunnelCompression": "Disable"},
+               "REDMTU": "1500"}
+    cfg.ip_interfaces[f"RED {nom}"] = (ip, masque)
+    cfg.ajouter(Operation(onglet, ligne, nom, "REDDevice", contenu, ETAPES["vlan"] + 1, refs=[("zone", zone)],
+                          conseil_echec="ajoutez le RED dans Réseau > Interfaces > Ajouter > RED"))
 
 
 CONSTRUCTEURS = {
     "Interfaces": _interfaces, "Zones": _zones, "VLAN": _vlan, "Routes": _routes, "Wi-Fi": _wifi,
     "Hôtes": _hotes, "Groupes": _groupes, "Services": _services, "DHCP": _dhcp,
     "Réservations DHCP": _reservations, "Comptes": _comptes, "VPN sites": _vpn_sites,
-    "Redirections": _redirections, "Règles": _regles,
+    "Redirections": _redirections, "Règles": _regles, "SD-WAN": _sdwan, "Priorités": _priorites, "RED": _red,
 }
 SANS_NOM = {"Interfaces", "VLAN", "Routes", "Réservations DHCP", "Comptes"}
 
@@ -682,6 +759,42 @@ def _general(cfg: Configuration) -> None:
            etape=ETAPES["routes"], refs=[("passerelle", g["Passerelle de secours"] or f"{port}_GW")])
     if _oui(g["VPN télétravail activé"]):
         _vpn_nomade(cfg)
+    if g.get("Pays bloqués"):
+        groupe = groupe_pays(cfg, "PAYS-BLOQUES", g["Pays bloqués"], "Pays dont tout le trafic est refusé")
+        regle(cfg, G, 0, "Blocage des pays interdits", action="Drop", zones_src=["WAN"], reseaux_src=[groupe],
+              position="Top", description="Refuse tout trafic venant des pays bloqués")
+    if _oui(g.get("Double authentification VPN")) or _oui(g.get("Double authentification administrateurs")):
+        vpn, admin = _oui(g.get("Double authentification VPN")), _oui(g.get("Double authentification administrateurs"))
+        op("Double authentification", "OTPSettings",
+           {"otp": "1", "allUsers": "1", "tokenAutoCreation": "1", "otpUserPortal": "1" if vpn else "0",
+            "otpVPNPortal": "1" if vpn else "0", "otpSSLVPN": "1" if vpn else "0",
+            "otpWebAdmin": "1" if admin else "0", "otpIPsec": "0"},
+           mode="maj", etape=ETAPES["après"] + 1 if admin else ETAPES["comptes"] + 1, facultatif=admin,
+           conseil_echec="activez les codes à usage unique dans Authentification > Mot de passe à usage unique")
+    if _oui(g.get("Inspection HTTPS activée")):
+        reseaux = [cfg.reseau(r, G, 0) for r in _liste(g.get("Réseaux à inspecter"))]
+        profil = g.get("Profil de déchiffrement") or "Maximum compatibility"
+        op("Moteur d'inspection HTTPS", "SSLTLSInspectionSettings",
+           {"SSLTLSEngine": "Enabled", "SSLTLSInspection": "Enabled"}, mode="patch", etape=ETAPES["règles"])
+        contenu = {"Name": "INSPECTION-HTTPS", "Description": "Déchiffrement HTTPS des postes (sophos_auto)",
+                   "IsDefault": "no", "Enable": "Yes", "Position": "Bottom", "LogConnections": "Enable",
+                   "DecryptAction": "Decrypt", "DecryptionProfile": profil, "SourceZones": {"Zone": ["LAN"]}}
+        if reseaux:
+            contenu["SourceNetworks"] = {"Network": reseaux}
+        contenu["DestinationZones"] = {"Zone": ["WAN"]}
+        op("INSPECTION-HTTPS", "SSLTLSInspectionRule", contenu, etape=ETAPES["règles"] + 1,
+           refs=[("decryptprofile", profil)] + [("reseau", r) for r in reseaux])
+    role = g.get("Rôle haute disponibilité") or "Aucun"
+    if role in ("Principal", "Secondaire"):
+        if not g.get("Port de liaison HA"):
+            raise ErreurLigne("haute disponibilité : indiquez le port de liaison entre les deux pare-feux")
+        op(f"Haute disponibilité ({role.lower()})", "HAConfigure", {"HA_Quick": {
+            "Device": "Active_Passive" if role == "Principal" else "Auxilliary",
+            "NodeName": g.get("Nom d'hôte du pare-feu") or ("fw-principal" if role == "Principal" else "fw-secondaire"),
+            "DedicatedLink": g["Port de liaison HA"],
+            "Passphrase": _secret(g.get("Phrase secrète HA"), "Phrase secrète de la haute disponibilité")}},
+           mode="maj", etape=ETAPES["central"] + 1, facultatif=True,
+           conseil_echec="configurez la HA dans Système > Haute disponibilité (mode rapide), même phrase secrète des deux côtés")
     if _oui(g["Inscrire dans Sophos Central"]):
         if not g["Central : e-mail du compte"]:
             raise ErreurLigne("Sophos Central : indiquez l'e-mail du compte Central")
@@ -889,11 +1002,14 @@ def _verifier_references(cfg: Configuration) -> None:
                 continue
             if (type_ == "zone" and nom in ZONES_ORIGINE) or (type_ == "service" and nom in SERVICES_ORIGINE):
                 continue
-            if type_ in ("webfilter", "appfilter", "ips", "vpnprofile", "passerelle"):
+            if type_ in ("webfilter", "appfilter", "ips", "vpnprofile", "passerelle", "decryptprofile"):
                 continue  # stratégies d'origine : vérifiées sur le pare-feu au lancement
             if type_ == "interface" and re.fullmatch(r"Port\d+(\.\d+)?", nom):
                 continue
-            quoi = {"zone": "zone", "reseau": "réseau", "service": "service", "webfilter": "stratégie web",
+            if type_ in ("decryptprofile", "qos") and cfg.defini(type_, nom):
+                continue
+            quoi = {"decryptprofile": "profil de déchiffrement", "qos": "priorité",
+                    "zone": "zone", "reseau": "réseau", "service": "service", "webfilter": "stratégie web",
                     "appfilter": "stratégie d'applications", "ips": "stratégie IPS", "vpnprofile": "profil IPsec",
                     "interface": "interface", "passerelle": "passerelle"}[type_]
             ou = f"[{o.onglet} ligne {o.ligne}]" if o.ligne else f"[{o.onglet}]"

@@ -71,6 +71,29 @@ GENERAL: list[tuple[str, str, str, list[str] | None, bool]] = [
     ("AD : mot de passe", DEMANDER, "", None, True),
     ("AD : port", "389", "389 (ou 636 en LDAPS)", None, False),
 
+    ("▸ Filtrage par pays", "", "", None, False),
+    ("Pays autorisés depuis Internet", "", "Accès depuis Internet (redirections) limités à ces pays, séparés par ; "
+     "(noms anglais : France;Belgium;Switzerland). Vide = tous", None, False),
+    ("Pays bloqués", "", "Tout trafic venant de ces pays est refusé (noms anglais, séparés par ;)", None, False),
+
+    ("▸ Double authentification (codes à usage unique)", "", "", None, False),
+    ("Double authentification VPN", "Non", "Oui = code sur téléphone (Sophos Authenticator, Google Authenticator...) "
+     "en plus du mot de passe pour le VPN et le portail utilisateur", OUI_NON, False),
+    ("Double authentification administrateurs", "Non", "Oui = code demandé aussi pour l'administration web "
+     "(à activer en dernier : le script ne pourra plus se connecter sans code)", OUI_NON, False),
+
+    ("▸ Inspection du trafic chiffré (HTTPS)", "", "", None, False),
+    ("Inspection HTTPS activée", "Non", "Le pare-feu analyse aussi les sites en HTTPS (le certificat du pare-feu doit "
+     "être installé sur les postes)", OUI_NON, False),
+    ("Profil de déchiffrement", "Maximum compatibility", "Profil d'origine du pare-feu", None, False),
+    ("Réseaux à inspecter", "", "Objets ou réseaux (ex. 192.168.10.0/24) séparés par ; — vide = tout le LAN", None, False),
+
+    ("▸ Haute disponibilité (2 pare-feux)", "", "", None, False),
+    ("Rôle haute disponibilité", "Aucun", "Principal (configuré en premier) ou Secondaire ; Aucun = un seul pare-feu",
+     ["Aucun", "Principal", "Secondaire"], False),
+    ("Port de liaison HA", "", "Port reliant directement les deux pare-feux (ex. Port8)", None, False),
+    ("Phrase secrète HA", DEMANDER, "Identique sur les deux pare-feux", None, True),
+
     ("▸ Sophos Central", "", "", None, False),
     ("Inscrire dans Sophos Central", "Non", "Oui = le script inscrit le boîtier dans Central (inutile en Zero Touch)", OUI_NON, False),
     ("Central : e-mail du compte", "", "Compte administrateur Sophos Central du client", None, False),
@@ -212,6 +235,33 @@ ONGLETS: dict[str, list[tuple[str, str, list[str] | None]]] = {
         ("Zone du serveur", "LAN, DMZ...", None),
         ("Sources autorisées", "IP/réseaux autorisés à se connecter ; vide = tout Internet", None),
     ],
+    "SD-WAN": [
+        ("Actif", "Oui / Non", OUI_NON),
+        ("Nom", "Ex. VOIX-SUR-FIBRE", None),
+        ("Réseaux source", "Objets ou réseaux concernés (ex. le VLAN téléphonie) ; vide = tous", None),
+        ("Services", "Services concernés (ex. « UDP 5060 ») ; vide = tous", None),
+        ("Passerelle principale", "Nom de la passerelle à utiliser (ex. Port2_GW)", None),
+        ("Passerelle de secours", "Passerelle si la principale tombe (ex. Port3_GW) ; vide = aucune", None),
+    ],
+    "Priorités": [
+        ("Actif", "Oui / Non", OUI_NON),
+        ("Nom", "Ex. PRIORITE-VOIX", None),
+        ("Priorité", "Temps réel (voix, visio), Critique (logiciel métier), Normale, Faible (téléchargements)",
+         ["Temps réel", "Critique", "Normale", "Faible"]),
+        ("Garanti (Ko/s)", "Débit toujours réservé, en kilo-octets par seconde (ex. 256)", None),
+        ("Maximum (Ko/s)", "Débit maximal autorisé (ex. 2048)", None),
+        ("Description", "Texte libre", None),
+    ],
+    "RED": [
+        ("Actif", "Oui / Non", OUI_NON),
+        ("Nom", "Nom de l'agence (ex. AGENCE-LYON)", None),
+        ("Modèle", "Modèle du boîtier RED", ["RED15", "RED15W", "red20", "RED50", "red60"]),
+        ("ID du RED", "Numéro inscrit sous le boîtier (ID)", None),
+        ("Adresse du pare-feu", "IP publique ou nom DNS du pare-feu, que le RED contactera", None),
+        ("Zone", "Zone du réseau de l'agence (LAN par défaut)", None),
+        ("Adresse IP", "IP du pare-feu sur le réseau de l'agence (ex. 192.168.30.254)", None),
+        ("Masque", "Ex. /24", None),
+    ],
     "Règles": [
         ("Actif", "Oui / Non", OUI_NON),
         ("Nom", "Nom de la règle. Les règles sont créées dans l'ordre du tableau.", None),
@@ -226,6 +276,7 @@ ONGLETS: dict[str, list[tuple[str, str, list[str] | None]]] = {
         ("Contrôle d'applications", "Nom de la stratégie (ex. Block generally unwanted apps) ; vide = aucune", None),
         ("IPS", "Nom de la stratégie IPS (ex. lantowan_general) ; vide = aucune", None),
         ("Antivirus", "Analyser les téléchargements (HTTP/HTTPS/FTP)", OUI_NON),
+        ("Priorité (QoS)", "Nom d'une ligne de l'onglet Priorités ; vide = aucune", None),
         ("Description", "Texte libre", None),
     ],
 }

@@ -11,6 +11,7 @@ from tests.repondeur import Repondeur
 SCENARIO_PME = [
     (r"Nom du client", "Dupont Industrie"),
     (r"Votre choix", "2"),                                  # situation : PME
+    (r"Votre choix", "1"),                                  # métier : généraliste
     (r"géré dans Sophos Central", "n"),
     (r"Votre choix", "2"),                                  # WAN : IP fixe
     (r"IP du pare-feu côté Internet", "203.0.113.10/29"),
@@ -34,7 +35,7 @@ SCENARIO_PME = [
     (r"Adresse IP réservée", "192.168.1.50"),
     (r"découpé en VLAN", "o"),
     (r"Votre choix", "1"),                                  # VLAN téléphonie
-    (r"Votre choix", "7"),                                  # fin des VLAN
+    (r"Votre choix", "q"),                                  # fin des VLAN
     (r"Votre choix", "1"),                                  # Internet : tout autoriser
     (r"bornes Wi-Fi Sophos", "o"),
     (r"accessible depuis Internet", "o"),
@@ -58,6 +59,8 @@ SCENARIO_PME = [
     (r"reçoit les alertes", "support@presta.fr"),
     (r"Mot de passe SMTP \(saisie", "Smtp-Passw0rd"),
     (r"Confirmez", "Smtp-Passw0rd"),
+    (r"principal du coffre", "Coffre-Test-123"),
+    (r"Confirmez", "Coffre-Test-123"),
     (r"Votre choix", "1"),                                  # sauvegarde par e-mail
     (r"Votre choix", "1"),                                  # hebdomadaire
     (r"supervisé en SNMP", "o"),
@@ -108,6 +111,14 @@ def test_assistant_pme_complet(tmp_path, monkeypatch):
     assert o("WirelessNetworks", "WIFI-INVITES")["ClientIsolation"] == "Enabled"
     assert o("FirewallRule", "Wi-Fi invités vers Internet")
     assert o("SNMPCommunity", "supervision-dupont-industrie")
+    assert o("QoSPolicy", "PRIORITE-VOIX")["Priority"] == "RealTime"
+    assert o("FirewallRule", "TELEPHONIE vers Internet")["NetworkPolicy"]["TrafficShapingPolicy"] == "PRIORITE-VOIX"
+    assert o("SDWANPolicyRoute", "VOIX-LIEN-PRINCIPAL")["BackupGateway"] == "Port3_GW"
+    assert o("OTPSettings", "")["otpSSLVPN"] == "1"
+    from pykeepass import PyKeePass
+    coffre = PyKeePass(str(tmp_path / "clients" / "dupont-industrie.kdbx"), password="Coffre-Test-123")
+    titres = {e.title: e.password for e in coffre.entries}
+    assert titres["Mot de passe SMTP"] == "Smtp-Passw0rd" and "Clé partagée du VPN VPN-LYON" in titres
     # aucun mot de passe redemandé pendant l'application
     debut = next(i for i, (q, _) in enumerate(journal) if "Envoyer au pare-feu" in q)
     assert not any(("Confirmez" in q or "Mot de passe" in q) for q, _ in journal[debut:])
@@ -120,10 +131,12 @@ def test_assistant_petit_bureau_valeurs_par_defaut(tmp_path, monkeypatch):
         (r"Nom du client", "Boulangerie Martin"),
         (r"alertes du pare-feu par e-mail", "n"),
         (r"Votre choix", "1"),   # situation
+        (r"Votre choix", "1"),   # métier
         (r"Votre choix", "1"),   # WAN DHCP
         (r"Votre choix", "1"),   # DHCP par le pare-feu
         (r"Votre choix", "1"),   # Internet : tout
         (r"Votre choix", "2"),   # sauvegarde : locale (pas d'e-mail configuré)
+        (r"coffre-fort KeePass", "n"),
         (r"Appliquer la configuration", "n"),
     ])
     monkeypatch.setattr(builtins, "input", r)
@@ -161,6 +174,7 @@ def test_assistant_retour_et_reprise(tmp_path, monkeypatch):
     r = Repondeur([
         (r"Nom du client", "Garage Test"),
         (r"Votre choix", "1"),
+        (r"Votre choix", "1"),
         (r"géré dans Sophos Central", "n"),
         (r"Port du XGS relié à la box", "<"),        # recommencer l'étape Internet
         (r"Port du XGS relié à la box", "Port3"),
@@ -186,7 +200,7 @@ def test_assistant_retour_et_reprise(tmp_path, monkeypatch):
     # Reprise : on choisit le brouillon, on termine avec les réponses par défaut
     r2 = Repondeur([(r"Votre choix", "2"), (r"alertes du pare-feu par e-mail", "n"),
                     (r"Votre choix", "1"), (r"Votre choix", "1"), (r"Votre choix", "2"),
-                    (r"Appliquer la configuration", "n")])
+                    (r"coffre-fort KeePass", "n"), (r"Appliquer la configuration", "n")])
     monkeypatch.setattr(builtins, "input", r2)
     monkeypatch.setattr(getpass, "getpass", r2)
     assert assistant.main() == 0

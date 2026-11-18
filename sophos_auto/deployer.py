@@ -33,6 +33,9 @@ SOURCES_NOMS = {
     "ips": [("IPSPolicy", "Name")],
     "vpnprofile": [("VPNProfile", "Name")],
     "interface": [("Interface", "Hardware"), ("Interface", "Name"), ("VLAN", "Name")],
+    "decryptprofile": [("DecryptionProfile", "Name")],
+    "qos": [("QoSPolicy", "Name")],
+    "passerelle": [("GatewayConfiguration", "Gateway")],
 }
 
 
@@ -157,14 +160,20 @@ def verifier_sur_pare_feu(api: SophosAPI, cfg: Configuration) -> list[str]:
     for t in {t for t, _ in besoins}:
         noms: set[str] = set()
         for balise, champ in SOURCES_NOMS[t]:
-            noms |= api.noms(balise, champ)
+            if balise == "GatewayConfiguration":   # noms des passerelles, dans une liste
+                lu = api.lire(balise)
+                racine = lu if isinstance(lu, dict) else ((lu or [{}])[0] if isinstance(lu, list) else {})
+                gws = racine.get("Gateway") if isinstance(racine, dict) else None
+                noms |= {str(x.get("Name")) for x in (gws if isinstance(gws, list) else [gws]) if isinstance(x, dict)}
+            else:
+                noms |= api.noms(balise, champ)
         existants[t] = noms
     problemes = []
     for t, n in sorted(besoins):
         if n not in existants[t]:
             dispo = sorted(existants[t])
             astuce = f" Disponibles : {', '.join(dispo[:12])}{'…' if len(dispo) > 12 else ''}" if dispo and t in (
-                "webfilter", "appfilter", "ips", "vpnprofile", "zone") else ""
+                "webfilter", "appfilter", "ips", "vpnprofile", "zone", "decryptprofile", "qos", "passerelle") else ""
             problemes.append(f"« {n} » ({t}) n'existe pas sur le pare-feu.{astuce}")
     return problemes
 
@@ -222,6 +231,8 @@ NOMS_BALISES = {
     "Zone": "zone(s)", "VLAN": "VLAN", "Interface": "interface(s)", "DHCPServer": "serveur(s) DHCP",
     "User": "compte(s)", "VPNIPSecConnection": "opération(s) VPN IPsec", "SSLVPNPolicy": "stratégie(s) VPN SSL",
     "WirelessNetworks": "réseau(x) Wi-Fi", "UnicastRoute": "route(s)", "AuthenticationServer": "serveur(s) AD",
+    "CountryGroup": "groupe(s) de pays", "SDWANPolicyRoute": "route(s) SD-WAN", "QoSPolicy": "priorité(s) de débit",
+    "REDDevice": "boîtier(s) RED", "SSLTLSInspectionRule": "règle(s) d'inspection HTTPS",
 }
 
 

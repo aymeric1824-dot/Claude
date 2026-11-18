@@ -11,7 +11,7 @@ from pathlib import Path
 from .assistant import (FICHE_COLLECTE, Retour, B, C, F, G, J, R, choix, conseil, info, oui_non, texte, titre,
                         _v_ip)
 
-VERSION = "4.0"
+from . import __version__ as VERSION
 
 
 def _pause():
@@ -194,6 +194,38 @@ def action_parametres():
         "prefixe_admin": texte("Identifiant du compte administrateur nominatif proposé", p["prefixe_admin"]),
     })
     print(f"{G}✔ Paramètres enregistrés (parametres.json).{F}")
+
+
+def action_glossaire():
+    from .glossaire import chercher
+    titre("GLOSSAIRE")
+    while True:
+        mot = texte("Mot à expliquer (Entrée pour revenir au menu, * pour tout afficher)", "", vide_ok=True)
+        if not mot:
+            return
+        res = chercher("" if mot == "*" else mot)
+        if not res:
+            print(f"{J}   Aucun terme trouvé.{F}")
+        for terme, definition in res:
+            print(f"{C}{B}{terme}{F} : {definition}")
+
+
+def action_mise_a_jour():
+    from .mise_a_jour import installer, verifier
+    print("Recherche d'une nouvelle version...")
+    info_maj = verifier(delai=10)
+    if not info_maj:
+        print(f"{G}✔ Vous avez la dernière version ({VERSION}).{F}")
+        return
+    print(f"{J}Nouvelle version {info_maj['version']} disponible (vous avez la {VERSION}).{F}")
+    if info_maj.get("notes"):
+        print(info_maj["notes"][:1500])
+    if oui_non("Installer la mise à jour maintenant ?", True):
+        resultat = installer(info_maj)
+        if resultat == "RELANCE":
+            print(f"{G}Mise à jour téléchargée : le programme va redémarrer.{F}")
+            os._exit(0)
+        print(resultat)
 
 
 def action_lire():
@@ -438,6 +470,8 @@ MENU = [
     ("lire", "Voir les objets d'un pare-feu (règles, hôtes, VPN...)", action_lire),
     ("modele", "Créer un fichier Excel vierge (modèle)", action_modele),
     ("parametres", "Mes paramètres (nom de ma société, valeurs par défaut)", action_parametres),
+    ("glossaire", "Glossaire : les termes techniques expliqués", action_glossaire),
+    ("maj", "Mise à jour du programme", action_mise_a_jour),
     ("quitter", "Quitter", None),
 ]
 
@@ -445,6 +479,13 @@ MENU = [
 def main() -> int:
     if os.name == "nt":
         os.system("")
+    try:
+        from .mise_a_jour import verifier
+        nouvelle = verifier(delai=3)
+        if nouvelle:
+            print(f"{J}Nouvelle version {nouvelle['version']} disponible : menu « Mise à jour du programme ».{F}")
+    except Exception:
+        pass
     for flux in (sys.stdout, sys.stderr):
         try:
             flux.reconfigure(errors="replace")   # jamais de plantage sur un caractère non affichable
