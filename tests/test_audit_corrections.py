@@ -124,10 +124,12 @@ def test_lire_ne_confond_pas_un_objet_avec_une_reponse_vide(faux):
 
 def test_script_de_mise_a_jour_sans_timeout():
     """Faute 16 : le script de remplacement n'utilise pas « timeout » et réessaie tant que l'ancien est ouvert."""
+    from pathlib import PureWindowsPath
     from sophos_auto.mise_a_jour import script_remplacement
-    script = script_remplacement(Path("C:/A B/SophosXGS.nouveau.exe"), Path("C:/A B/SophosXGS.exe"))
+    neuf, exe = PureWindowsPath("C:/A B/SophosXGS.nouveau.exe"), PureWindowsPath("C:/A B/SophosXGS.exe")
+    script = script_remplacement(neuf, exe)
     assert "timeout" not in script and "goto attente" in script and "ping -n 2" in script
-    assert 'move /y "C:/A B/SophosXGS.nouveau.exe" "C:/A B/SophosXGS.exe"' in script
+    assert f'move /y "{neuf}" "{exe}"' in script and "C:\\A B\\SophosXGS.exe" in script
     assert script.index("move") < script.index("start")
 
 
