@@ -105,6 +105,19 @@ class SophosAPI:
             return None  # "Number of records Zero."
         return contenu
 
+    def noms(self, balise: str, champ: str = "Name") -> set[str]:
+        """Noms des objets existants d'un type (ensemble vide si aucun ou type inconnu)."""
+        try:
+            contenu = self.lire(balise)
+        except ErreurConnexion:
+            raise
+        except ErreurAPI:
+            return set()
+        if contenu is None:
+            return set()
+        elements = contenu if isinstance(contenu, list) else [contenu]
+        return {str(e.get(champ)) for e in elements if isinstance(e, dict) and e.get(champ)}
+
     def ecrire(self, balise: str, contenu: dict, operation: str = "add") -> Resultat:
         """Envoie un objet avec Set operation="add" ou "update"."""
         corps = f'<Set operation="{operation}">{to_xml({balise: contenu})}</Set>'
@@ -127,6 +140,10 @@ _DEJA = re.compile(r"already exists|same name", re.IGNORECASE)
 
 def analyser_statut(reponse: dict, balise: str) -> Resultat:
     bloc = reponse.get(balise)
+    if not (isinstance(bloc, (dict, list))):
+        # certaines réponses portent un autre nom de balise : on prend le premier bloc avec un statut
+        bloc = next((v for k, v in reponse.items() if k not in ("Login", "@APIVersion", "@IPS_CAT_VER")
+                     and isinstance(v, (dict, list))), None)
     if isinstance(bloc, list):
         bloc = bloc[0]
     if not isinstance(bloc, dict) or "Status" not in bloc:

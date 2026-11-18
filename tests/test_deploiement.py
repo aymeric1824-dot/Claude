@@ -1,44 +1,12 @@
-"""Tests sans vrai pare-feu : un faux XGS en mémoire remplace requests.post."""
-import xmltodict
+"""Tests du fichier Excel et du déploiement, sans vrai pare-feu."""
 import pytest
+from openpyxl import load_workbook
 
 from sophos_auto import api as api_mod
 from sophos_auto.creer_modele import creer
 from sophos_auto.deployer import main
 from sophos_auto.modele import lire_classeur
-
-
-class FauxXGS:
-    def __init__(self, mdp="secret"):
-        self.mdp, self.objets, self.requetes = mdp, {}, []
-
-    def post(self, url, data, headers, verify, timeout):
-        req = xmltodict.parse(data["reqxml"])["Request"]
-        self.requetes.append(req)
-        if req["Login"]["Password"] != self.mdp:
-            return _rep("<Login><status>Authentication Failure</status></Login>")
-        corps = "<Login><status>Authentication Successful</status></Login>"
-        if "Set" in req:
-            op = req["Set"]["@operation"]
-            for balise, contenu in req["Set"].items():
-                if balise.startswith("@"):
-                    continue
-                cle = (balise, (contenu or {}).get("Name", ""))
-                if op == "add" and cle in self.objets:
-                    corps += f'<{balise}><Status code="502">Operation failed. Entity having same name already exists.</Status></{balise}>'
-                else:
-                    self.objets[cle] = contenu
-                    corps += f'<{balise}><Status code="200">Configuration applied successfully.</Status></{balise}>'
-        return _rep(corps)
-
-
-class _R:
-    def __init__(self, txt):
-        self.content, self.text = txt.encode(), txt
-
-
-def _rep(corps):
-    return _R(f'<?xml version="1.0" encoding="UTF-8"?><Response APIVersion="2100.1">{corps}</Response>')
+from tests.faux_xgs import FauxXGS
 
 
 @pytest.fixture
@@ -47,57 +15,76 @@ def modele(tmp_path):
 
 
 @pytest.fixture
-def faux(monkeypatch):
+def faux(monkeypatch, tmp_path):
     f = FauxXGS()
     monkeypatch.setattr(api_mod.requests, "post", f.post)
     monkeypatch.setenv("SOPHOS_MOT_DE_PASSE", "secret")
+    monkeypatch.chdir(tmp_path)
     return f
+
+
+def _sans_secrets(chemin):
+    wb = load_workbook(chemin)
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for c in row:
+                if c.value == "*demander*":
+                    c.value = "MotDePasse-Test-1"
+    wb.save(chemin)
 
 
 def test_modele_valide(modele):
     cfg = lire_classeur(modele)
     assert cfg.erreurs == []
-    noms = [o.nom for o in cfg.objets]
-    assert "INVITES" not in noms and "Port1.10" in noms and "LAN vers Internet" in noms
-    svc = next(o for o in cfg.objets if o.nom == "RDP-TCP-UDP")
-    assert [d["Protocol"] for d in svc.contenu["ServiceDetails"]["ServiceDetail"]] == ["TCP", "UDP"]
-    res = next(o for o in cfg.objets if o.nom == "RES-SERVEURS")
-    assert res.contenu["Subnet"] == "255.255.255.0"
-    assert any("HTTPS" in w for w in cfg.avertissements)  # service d'origine, simple avertissement
+    noms = {o.nom for o in cfg.operations}
+    assert {"Port1.10", "LAN vers Internet", "DHCP-LAN", "RES_192.168.10.0_24"} <= noms
+    dhcp = next(o for o in cfg.operations if o.nom == "DHCP-LAN")
+    assert dhcp.contenu["StaticLease"]["Lease"][0]["MACAddress"] == "00:11:22:33:44:55"
+    assert not cfg.avertissements  # HTTP/HTTPS/DNS et stratégies d'origine : pas d'avertissement
 
 
 def test_erreurs_detectees(tmp_path):
-    from openpyxl import load_workbook
     chemin = creer(str(tmp_path / "c.xlsx"))
     wb = load_workbook(chemin)
     wb["Hôtes"]["D2"] = "172.16.16.5"     # pas une adresse de réseau
-    wb["Hôtes"]["D4"] = "192.168.10.300"  # IP invalide
+    wb["Hôtes"]["D3"] = "192.168.10.300"  # IP invalide
     wb["Services"]["D2"] = "99999"
+    wb["Réservations DHCP"]["D2"] = "pas-une-mac"
     wb.save(chemin)
     erreurs = lire_classeur(chemin).erreurs
-    assert len(erreurs) == 3, erreurs
+    assert len(erreurs) == 4, erreurs
 
 
-def test_deploiement_puis_relance(modele, faux, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_deploiement_puis_relance(modele, faux):
+    _sans_secrets(modele)
     assert main([modele]) == 0
-    assert ("FirewallRule", "LAN vers Internet") in faux.objets
-    assert ("VLAN", "Port1.10") in faux.objets
-    n = len(faux.objets)
+    assert faux.obtenir("FirewallRule", "LAN vers Internet")["NetworkPolicy"]["WebFilter"] == "Default Workplace Policy"
+    assert faux.obtenir("VLAN", "Port1.10")
+    assert faux.obtenir("Interface", "Port2")["IPv4Assignment"] == "DHCP"
+    assert faux.obtenir("AdminSettings", "")["HostnameSettings"]["HostName"] == "fw-exemple"
+    n = sum(len(v) for v in faux.objets.values())
     assert main([modele]) == 0           # relance : mises à jour, pas de doublons
-    assert len(faux.objets) == n
-    assert list((tmp_path / "rapports").iterdir())
+    assert sum(len(v) for v in faux.objets.values()) == n
 
 
-def test_mauvais_mot_de_passe(modele, faux, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_nom_inconnu_sur_le_pare_feu(modele, faux, monkeypatch):
+    _sans_secrets(modele)
+    wb = load_workbook(modele)
+    wb["Règles"]["J2"] = "Strategie-Inexistante"
+    wb.save(modele)
+    monkeypatch.setattr("builtins.input", lambda *_: "n")
+    assert main([modele]) == 1
+    assert faux.obtenir("FirewallRule", "LAN vers Internet") is None
+
+
+def test_mauvais_mot_de_passe(modele, faux, monkeypatch):
     monkeypatch.setenv("SOPHOS_MOT_DE_PASSE", "faux")
     assert main([modele]) == 1
-    assert faux.objets == {}
 
 
-def test_simulation_n_envoie_rien(modele, faux, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_simulation_n_envoie_rien(modele, faux):
     assert main([modele, "--simulation"]) == 0
     assert faux.requetes == []
-    assert len(list((tmp_path / "simulation").rglob("*.xml"))) > 10
+    fichiers = list((faux_dir := __import__("pathlib").Path("simulation")).rglob("*.xml"))
+    assert len(fichiers) > 10
+    assert all("MotDePasse" not in f.read_text() for f in fichiers)
