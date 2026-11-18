@@ -34,7 +34,8 @@ class FauxXGS:
         self.requetes: list[dict] = []
         self.objets: dict[str, dict[str, dict]] = {}
         for z in ("LAN", "WAN", "DMZ", "VPN", "WiFi"):
-            self._mettre("Zone", {"Name": z, "Type": z, "ApplianceAccess": {"AdminServices": {"HTTPS": "Enable"}}})
+            admin = "Disable" if z == "WAN" else "Enable"
+            self._mettre("Zone", {"Name": z, "Type": z, "ApplianceAccess": {"AdminServices": {"HTTPS": admin}}})
         for n, ip_ in (("Port1", "172.16.16.16"), ("Port2", None), ("Port3", None)):
             d = {"Name": n, "Hardware": n, "NetworkZone": "LAN" if n == "Port1" else "WAN", "IPv4Assignment": "Static",
                  "Status": "Connected", "InterfaceStatus": "ON"}

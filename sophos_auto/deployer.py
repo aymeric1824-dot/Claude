@@ -11,6 +11,7 @@ import argparse
 import copy
 import datetime as dt
 import getpass
+import json
 import os
 import sys
 from pathlib import Path
@@ -208,6 +209,48 @@ def _reconnexion(api: SophosAPI, op: Operation, ip_pc: str | None, confirmer) ->
                 return None
 
 
+# ----------------------------------------------------------------------------- sécurité avant / après
+def photo_avant(api: SophosAPI, cfg: Configuration, chemin: Path) -> int:
+    """Enregistre l'état actuel des types d'objets qui vont être modifiés (pour comparer ou revenir en arrière)."""
+    etat = {}
+    for balise in sorted({o.balise for o in cfg.operations}):
+        try:
+            etat[balise] = api.lire(balise)
+        except ErreurConnexion:
+            raise
+        except ErreurAPI as exc:
+            etat[balise] = f"lecture impossible : {exc}"
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    chemin.write_text(json.dumps(etat, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    return len(etat)
+
+
+def _cle_op(op: Operation) -> str:
+    c = op.contenu
+    for sous in ("TunnelPolicy", "Configuration", "ActiveDirectory"):
+        if isinstance(c.get(sous), dict):
+            c = c[sous]
+    return str(c.get("Name") or c.get("Username") or c.get("ServerName") or "")
+
+
+def verifier_presence(api: SophosAPI, operations: list[Operation]) -> list[Operation]:
+    """Relit le pare-feu et renvoie les objets créés qu'on ne retrouve pas."""
+    cache: dict[str, str] = {}
+    absents = []
+    for o in operations:
+        cle = _cle_op(o)
+        if o.mode != "creer" or o.existe_ok or not cle:
+            continue
+        if o.balise not in cache:
+            try:
+                cache[o.balise] = json.dumps(api.lire(o.balise), ensure_ascii=False, default=str)
+            except ErreurAPI:
+                cache[o.balise] = ""
+        if json.dumps(cle, ensure_ascii=False) not in cache[o.balise]:
+            absents.append(o)
+    return absents
+
+
 # ----------------------------------------------------------------------------- programme principal
 def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=None, mot_de_passe=None,
              verifier_certificat=False, continuer=False, secrets: dict[str, str] | None = None,
@@ -268,9 +311,19 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
     else:
         print(f"{VERT}✔ Tous les noms sont connus{FIN}\n")
 
+    horodatage = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
+    photo = Path("rapports") / f"{_fichier(client)}_{horodatage}_avant.json"
+    try:
+        n = photo_avant(api, cfg, photo)
+        print(f"{VERT}✔ État actuel enregistré ({n} types d'objets) : {photo}{FIN}")
+    except ErreurAPI as exc:
+        print(f"{ROUGE}✘ Impossible de lire l'état actuel : {exc}{FIN}")
+        return 1
+
     demander_secrets(cfg, secrets)
 
     journal, nb_ok, nb_ko = [], 0, 0
+    reussies: list[Operation] = []
     reconnecte = False
     for o in cfg.operations:
         if o.etape == ETAPES["après"] and not reconnecte:
@@ -298,6 +351,7 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
             res, action = Resultat(False, "?", str(exc)), "erreur"
         if res.ok:
             nb_ok += 1
+            reussies.append(o)
             print(f"{VERT}  ✔{FIN} {o.libelle} {GRIS}({action}){FIN}")
             journal.append(f"OK     {o.libelle} ({action})")
         else:
@@ -305,8 +359,31 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
             print(f"{ROUGE}  ✘ {o.libelle} — {res.code} : {res.message}{FIN}")
             journal.append(f"ERREUR {o.libelle} — {res.code} : {res.message}")
 
+    print("\nVérification : relecture du pare-feu...")
+    try:
+        absents = verifier_presence(api, reussies)
+    except ErreurAPI as exc:
+        absents = []
+        print(f"{JAUNE}  Relecture impossible : {exc}{FIN}")
+    for o in absents:
+        print(f"{JAUNE}  ! {o.libelle} : accepté par le pare-feu mais introuvable à la relecture{FIN}")
+        journal.append(f"À VÉRIFIER {o.libelle} : introuvable à la relecture")
+    if not absents:
+        print(f"{VERT}  ✔ Tous les objets créés sont bien présents{FIN}")
+
+    try:
+        from .audit import CRITIQUE, executer
+        constats, chemin_audit = executer(api, f"{api.url.split('//')[1].split('/')[0]}", client)
+        critiques = [c for c in constats if c.niveau == CRITIQUE]
+        print(f"\nContrôle de sécurité : {ROUGE if critiques else VERT}{len(critiques)} point(s) critique(s){FIN}"
+              f" — rapport : {chemin_audit}")
+        for c in critiques:
+            print(f"{ROUGE}  ✘ {c.titre}{FIN}")
+            journal.append(f"SÉCURITÉ (critique) {c.titre}")
+    except ErreurAPI as exc:
+        print(f"{JAUNE}  Contrôle de sécurité impossible : {exc}{FIN}")
+
     Path("rapports").mkdir(exist_ok=True)
-    horodatage = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
     rapport = Path("rapports") / f"{_fichier(client)}_{horodatage}.txt"
     rapport.write_text(
         f"Client : {client}\nPare-feu : {ip}:{port}\nDate : {horodatage}\n"

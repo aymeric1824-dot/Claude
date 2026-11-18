@@ -8,8 +8,10 @@
 """
 from __future__ import annotations
 
+import copy
 import getpass
 import ipaddress
+import json
 import re
 import secrets as rnd
 import string
@@ -26,7 +28,16 @@ LARGEUR = 88
 
 
 class Retour(Exception):
-    pass
+    """L'utilisateur a tapé < (refaire l'étape) ou << (étape précédente)."""
+
+    def __init__(self, precedente: bool):
+        super().__init__()
+        self.precedente = precedente
+
+
+def _retour(rep: str) -> None:
+    if rep in ("<", "<<"):
+        raise Retour(rep == "<<")
 
 
 # ============================================================================ questions
@@ -59,6 +70,7 @@ def texte(question: str, defaut: str = "", aide: str = "", valider=None, vide_ok
     while True:
         d = f" [{defaut}]" if defaut else ""
         rep = _lire(f"{B}? {question}{F}{d} : ")
+        _retour(rep)
         if rep == "?":
             print(f"{C}{_wrap(aide or 'Pas d’explication supplémentaire pour cette question.')}{F}")
             continue
@@ -78,6 +90,7 @@ def texte(question: str, defaut: str = "", aide: str = "", valider=None, vide_ok
 def oui_non(question: str, defaut: bool = True, aide: str = "") -> bool:
     while True:
         rep = _lire(f"{B}? {question}{F} [{'O/n' if defaut else 'o/N'}] : ").lower()
+        _retour(rep)
         if rep == "?":
             print(f"{C}{_wrap(aide or 'Pas d’explication supplémentaire.')}{F}")
             continue
@@ -97,6 +110,7 @@ def choix(question: str, options: list[tuple[str, str]], defaut: int = 1, aide: 
         print(f"   {C}{i}{F}. {lib}")
     while True:
         rep = _lire(f"   Votre choix [{defaut}] : ")
+        _retour(rep)
         if rep == "?":
             print(f"{C}{_wrap(aide or 'Pas d’explication supplémentaire.')}{F}")
             continue
@@ -206,6 +220,9 @@ class Projet:
     reseaux_internes: list[str] = field(default_factory=list)
     zones_internes: list[str] = field(default_factory=list)
     serveurs: list[tuple[str, str, str]] = field(default_factory=list)  # (nom, ip, type)
+    situation: str = "autre"
+    central: bool = False          # le client est géré dans Sophos Central
+    zero_touch: bool = False       # le boîtier est préconfiguré par Central (Zero Touch)
     prochain_octet: int = 20
 
     def ligne(self, onglet: str, **valeurs) -> dict:
@@ -292,7 +309,9 @@ def etape_intro(p: Projet) -> str:
          "À la fin, il crée un fichier Excel (modifiable), une fiche récapitulative, et peut appliquer la "
          "configuration sur le boîtier.")
     info("Règles : appuyez sur Entrée pour garder la valeur proposée entre [crochets]. Tapez ? à n'importe quelle "
-         "question pour avoir une explication. Ctrl+C pour quitter.")
+         "question pour avoir une explication. Tapez < pour recommencer l'étape en cours, << pour revenir à "
+         "l'étape précédente. Vos réponses sont enregistrées après chaque étape : en cas d'interruption, vous "
+         "pourrez reprendre. Ctrl+C pour quitter.")
     if oui_non("Afficher d'abord la liste des informations à demander au client ?", False,
                "Utile si vous n'êtes pas encore chez le client : la liste est aussi enregistrée dans un fichier."):
         print(FICHE_COLLECTE)
@@ -314,6 +333,16 @@ def etape_intro(p: Projet) -> str:
         conseil("Avant de débrancher l'ancien équipement, relevez son adresse IP côté LAN, ses redirections de "
                 "ports, ses VPN et s'il distribue les adresses (DHCP). En reprenant la même IP côté LAN, les PC "
                 "n'auront rien à changer.")
+    p.central = oui_non("Ce pare-feu sera-t-il géré dans Sophos Central ?", True,
+                        "Sophos Central (aussi appelé Sophos Fusion) est la console en ligne de Sophos. Elle permet "
+                        "de préconfigurer le boîtier avant de le brancher (Zero Touch), de le gérer à distance, de "
+                        "planifier les mises à jour et de garder ses sauvegardes.")
+    if p.central:
+        p.zero_touch = oui_non("Préconfigurer le boîtier avec le Zero Touch de Sophos Central ?", True,
+                               "Vous saisissez le n° de série du boîtier dans Central avec les réglages de base "
+                               "(Internet, réseau local, DHCP, fuseau). Au premier démarrage, branché sur Internet, le "
+                               "boîtier télécharge ces réglages tout seul : plus d'assistant de démarrage en local. "
+                               "L'assistant vous donnera la liste exacte des valeurs à saisir dans Central.")
     return situation
 
 
@@ -409,7 +438,9 @@ def etape_lan(p: Projet, situation: str) -> None:
     p.ligne("Hôtes", Nom="RES-LAN", Type="Réseau", Adresse=str(iface.network.network_address),
             **{"Masque / IP de fin": str(iface.netmask), "Description": "Réseau local principal"})
     p.resume.append(f"LAN : {p.lan_port}, pare-feu en {iface}")
-    if str(iface.ip) != "172.16.16.16" or p.lan_port != "Port1":
+    if p.zero_touch:
+        p.general["Adresse IP du pare-feu"] = str(iface.ip)   # Central lui a déjà donné cette adresse
+    elif str(iface.ip) != "172.16.16.16" or p.lan_port != "Port1":
         p.ligne("Interfaces", Port=p.lan_port, Zone="LAN", Mode="Statique", **{"Adresse IP": str(iface.ip),
                 "Masque": str(iface.netmask), "Description": "Réseau local"})
         pc = str(list(iface.network.hosts())[-5])
@@ -837,6 +868,34 @@ def etape_administration(p: Projet) -> None:
         p.resume.append("Supervision SNMP v2c")
 
 
+def fiche_zero_touch(p: Projet) -> list[str]:
+    """Valeurs à saisir dans Sophos Central pour le Zero Touch."""
+    g = p.general
+    wan = next((l for l in p.lignes.get("Interfaces", []) if l.get("Port") == p.wan_port), {})
+    dhcp = next((l for l in p.lignes.get("DHCP", []) if l.get("Nom") == "DHCP-LAN"), None)
+    nom_fw = g.get("Nom d'hôte du pare-feu", "")
+    l = ["Dans Sophos Central : Pare-feux > Ajouter un pare-feu > Zero Touch, puis saisissez :",
+         "  - Numéro de série du boîtier (étiquette sous le XGS)",
+         f"  - Nom du pare-feu : {nom_fw}",
+         f"  - Fuseau horaire : {g.get('Fuseau horaire') or 'Europe/Paris'}",
+         f"  - Port Internet (WAN) : {p.wan_port}, mode {wan.get('Mode', 'DHCP')}"]
+    if wan.get("Mode") == "Statique":
+        l.append(f"      IP {wan.get('Adresse IP')} / {wan.get('Masque')}, passerelle {wan.get('Passerelle')}")
+    elif wan.get("Mode") == "PPPoE":
+        l.append(f"      identifiant PPPoE {wan.get('Utilisateur PPPoE')} (mot de passe : voir votre coffre-fort)")
+    if p.lan_iface:
+        l.append(f"  - Réseau local (LAN) : {p.lan_port}, IP {p.lan_iface.ip}, masque {p.lan_iface.netmask}")
+    if dhcp:
+        l.append(f"  - DHCP sur le LAN : de {dhcp['Début de plage']} à {dhcp['Fin de plage']}")
+    if g.get("DNS 1"):
+        l.append(f"  - DNS : {g['DNS 1']}" + (f", {g['DNS 2']}" if g.get("DNS 2") else ""))
+    l += ["  - Mot de passe admin : choisissez-le dans Central et rangez-le dans votre coffre-fort",
+          "Branchez ensuite le Port WAN sur Internet et allumez : le boîtier récupère sa configuration seul.",
+          f"Puis, depuis le réseau local, activez l'API (https://{p.lan_iface.ip if p.lan_iface else 'IP'}:4444 > "
+          "Sauvegarde et firmware > API) et lancez le script pour le reste de la configuration."]
+    return l
+
+
 A_FAIRE_COMMUN = [
     "Mettre à jour le firmware (Sauvegarde et firmware > Firmware) AVANT la mise en production.",
     "Vérifier les licences et l'enregistrement du boîtier (Administration > Licences).",
@@ -866,8 +925,15 @@ def etape_fin(p: Projet) -> None:
     ecrire_classeur(xlsx, p.general, p.lignes)
 
     a_faire = p.a_faire + A_FAIRE_COMMUN
+    if p.central:
+        a_faire = [a.replace("Facultatif : rattacher le boîtier à Sophos Central pour la gestion à distance (Système > Sophos Central).",
+                             "Vérifier que le boîtier apparaît dans Sophos Central (Gestion des pare-feux) et accepter "
+                             "la gestion ; activer les sauvegardes Central et planifier les mises à jour firmware depuis Central.")
+                   for a in a_faire]
     fiche = [f"FICHE DE CONFIGURATION — {client}", "=" * 60, "", "Ce qui est configuré :"]
     fiche += [f"  - {r}" for r in p.resume]
+    if p.zero_touch:
+        fiche += ["", "Préconfiguration Sophos Central (Zero Touch) :"] + [f"  {x}" for x in fiche_zero_touch(p)]
     fiche += ["", "À faire à la main :"] + [f"  {i}. {a}" for i, a in enumerate(a_faire, 1)]
     if p.infos_client:
         fiche += ["", "À transmettre au client :"] + [f"  - {i}" for i in p.infos_client]
@@ -880,6 +946,10 @@ def etape_fin(p: Projet) -> None:
         print(f"\n{J}{B}Mots de passe générés — NOTEZ-LES MAINTENANT (ils ne sont enregistrés nulle part) :{F}")
         for lib, v in p.generes:
             print(f"  {lib:<55} {B}{v}{F}")
+    if p.zero_touch:
+        print(f"\n{B}Préconfiguration Sophos Central (Zero Touch) :{F}")
+        for x in fiche_zero_touch(p):
+            print(f"  {x}")
     print(f"\n{B}À faire à la main :{F}")
     for i, a in enumerate(a_faire, 1):
         print(_wrap(f"{i}. {a}", "  "))
@@ -927,26 +997,111 @@ def _correspond(onglet, ligne, colonne, libelle) -> bool:
     return False
 
 
-def main() -> int:
+ETAPES = [
+    ("Le client", lambda p: setattr(p, "situation", etape_intro(p))),
+    ("Accès Internet", lambda p: etape_internet(p, p.situation)),
+    ("Réseau local", lambda p: etape_lan(p, p.situation)),
+    ("Serveurs", lambda p: etape_serveurs(p, p.situation)),
+    ("DHCP", lambda p: etape_dhcp(p, p.situation)),
+    ("VLAN", lambda p: etape_vlan(p, p.situation, bool(p.lignes.get("DHCP")))),
+    ("Wi-Fi", etape_wifi),
+    ("Protections", etape_securite),
+    ("Accès depuis Internet", etape_redirections),
+    ("VPN entre sites", lambda p: etape_vpn_sites(p, p.situation)),
+    ("Télétravail", lambda p: etape_teletravail(p, p.situation)),
+    ("Administration", etape_administration),
+]
+DOSSIER_BROUILLONS = Path("clients") / "brouillons"
+
+
+def _vers_json(p: Projet) -> dict:
+    d = {k: getattr(p, k) for k in p.__dataclass_fields__ if k not in ("secrets", "generes")}
+    d["lan_iface"] = str(p.lan_iface) if p.lan_iface else None
+    return d
+
+
+def _depuis_json(d: dict) -> Projet:
     p = Projet()
+    for k, v in d.items():
+        if k in p.__dataclass_fields__:
+            setattr(p, k, v)
+    p.lan_iface = ipaddress.IPv4Interface(d["lan_iface"]) if d.get("lan_iface") else None
+    p.serveurs = [tuple(x) for x in p.serveurs]
+    return p
+
+
+def enregistrer_brouillon(p: Projet, etape: int) -> None:
+    """Sauvegarde les réponses (jamais les mots de passe) pour pouvoir reprendre plus tard."""
+    if not p.general.get("Nom du client"):
+        return
+    DOSSIER_BROUILLONS.mkdir(parents=True, exist_ok=True)
+    f = DOSSIER_BROUILLONS / f"{_slug(p.general['Nom du client'])}.json"
+    f.write_text(json.dumps({"etape": etape, "projet": _vers_json(p)}, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _choisir_brouillon() -> tuple[Projet, int] | None:
+    brouillons = sorted(DOSSIER_BROUILLONS.glob("*.json")) if DOSSIER_BROUILLONS.exists() else []
+    if not brouillons:
+        return None
+    lus = []
+    for f in brouillons:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            lus.append((f, d))
+        except (ValueError, OSError):
+            continue
+    if not lus:
+        return None
+    options = [("nouveau", "Nouveau client")] + [
+        (str(i), f"Reprendre « {d['projet']['general'].get('Nom du client')} » (à l'étape « {ETAPES[min(d['etape'], len(ETAPES) - 1)][0]} »)")
+        for i, (_, d) in enumerate(lus)]
+    c = choix("Des configurations sont en cours. Que voulez-vous faire ?", options, 1)
+    if c == "nouveau":
+        return None
+    _, d = lus[int(c)]
+    p = _depuis_json(d["projet"])
+    conseil("Les mots de passe saisis avant l'interruption ne sont jamais enregistrés : ils vous seront demandés "
+            "au moment d'appliquer la configuration.")
+    return p, d["etape"]
+
+
+def main() -> int:
     try:
-        situation = etape_intro(p)
-        etape_internet(p, situation)
-        etape_lan(p, situation)
-        etape_serveurs(p, situation)
-        etape_dhcp(p, situation)
-        dhcp_fw = bool(p.lignes.get("DHCP"))
-        etape_vlan(p, situation, dhcp_fw)
-        etape_wifi(p)
-        etape_securite(p)
-        etape_redirections(p)
-        etape_vpn_sites(p, situation)
-        etape_teletravail(p, situation)
-        etape_administration(p)
-        etape_fin(p)
+        repris = _choisir_brouillon()
+    except Retour:
+        repris = None
     except KeyboardInterrupt:
-        print(f"\n{J}Assistant interrompu : rien n'a été enregistré.{F}")
         return 1
+    p, i = repris if repris else (Projet(), 0)
+    instantanes: dict[int, Projet] = {}
+    try:
+        while i < len(ETAPES):
+            instantanes[i] = copy.deepcopy(p)
+            try:
+                ETAPES[i][1](p)
+            except Retour as r:
+                if r.precedente and i > 0:
+                    i -= 1
+                p = copy.deepcopy(instantanes.get(i, p))
+                print(f"{J}   ↺ Retour à l'étape « {ETAPES[i][0]} »{F}")
+                continue
+            i += 1
+            enregistrer_brouillon(p, i)
+        while True:
+            try:
+                etape_fin(p)
+                break
+            except Retour:
+                print(f"{J}   Pour modifier une réponse, relancez l'assistant et reprenez la configuration en cours, "
+                      f"ou corrigez directement le fichier Excel.{F}")
+    except KeyboardInterrupt:
+        etat = "Vos réponses sont enregistrées : relancez l'assistant pour reprendre." if p.general.get("Nom du client") \
+            else "Rien n'a été enregistré."
+        print(f"\n{J}Assistant interrompu. {etat}{F}")
+        return 1
+    f = DOSSIER_BROUILLONS / f"{_slug(p.general.get('Nom du client', ''))}.json"
+    if f.exists():
+        f.unlink()
     return 0
 
 

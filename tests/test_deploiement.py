@@ -62,6 +62,9 @@ def test_deploiement_puis_relance(modele, faux):
     assert faux.obtenir("VLAN", "Port1.10")
     assert faux.obtenir("Interface", "Port2")["IPv4Assignment"] == "DHCP"
     assert faux.obtenir("AdminSettings", "")["HostnameSettings"]["HostName"] == "fw-exemple"
+    import pathlib
+    assert list(pathlib.Path("rapports").glob("*_avant.json"))      # état avant modification
+    assert list(pathlib.Path("rapports").glob("securite_*.html"))   # contrôle de sécurité après
     n = sum(len(v) for v in faux.objets.values())
     assert main([modele]) == 0           # relance : mises à jour, pas de doublons
     assert sum(len(v) for v in faux.objets.values()) == n

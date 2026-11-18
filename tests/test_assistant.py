@@ -11,6 +11,7 @@ from tests.repondeur import Repondeur
 SCENARIO_PME = [
     (r"Nom du client", "Dupont Industrie"),
     (r"Votre choix", "2"),                                  # situation : PME
+    (r"géré dans Sophos Central", "n"),
     (r"Votre choix", "2"),                                  # WAN : IP fixe
     (r"IP du pare-feu côté Internet", "203.0.113.10/29"),
     (r"DEUXIÈME accès", "o"),
@@ -132,8 +133,12 @@ def test_assistant_petit_bureau_valeurs_par_defaut(tmp_path, monkeypatch):
     assert cfg.erreurs == []
     noms = {o.nom for o in cfg.operations}
     assert {"DHCP-LAN", "LAN vers Internet", "Sauvegarde automatique", "admin-presta"} <= noms
-    lan = next(o for o in cfg.operations if o.balise == "Interface" and o.cle == "Port1")
-    assert lan.contenu["IPAddress"] == "192.168.10.254"
+    # Géré par Sophos Central en Zero Touch (réponses par défaut) : le boîtier a déjà sa nouvelle IP
+    assert cfg.general["Adresse IP du pare-feu"] == "192.168.10.254"
+    assert not any(o.balise == "Interface" and o.cle == "Port1" for o in cfg.operations)
+    fiche = (tmp_path / "clients" / "boulangerie-martin_fiche.txt").read_text(encoding="utf-8")
+    assert "Zero Touch" in fiche and "IP 192.168.10.254" in fiche and "Port2, mode DHCP" in fiche
+    assert not (tmp_path / "clients" / "brouillons" / "boulangerie-martin.json").exists()
 
 
 def test_assistant_mots_de_passe_dans_excel(tmp_path, monkeypatch):
@@ -148,3 +153,44 @@ def test_assistant_mots_de_passe_dans_excel(tmp_path, monkeypatch):
     cfg = lire_classeur(str(tmp_path / "clients" / "dupont-industrie.xlsx"))
     assert cfg.erreurs == []
     assert secrets_de(cfg) == []   # plus rien à demander : tout est dans le fichier
+
+
+def test_assistant_retour_et_reprise(tmp_path, monkeypatch):
+    """« < » recommence l'étape ; une interruption laisse un brouillon que l'on peut reprendre."""
+    monkeypatch.chdir(tmp_path)
+    r = Repondeur([
+        (r"Nom du client", "Garage Test"),
+        (r"Votre choix", "1"),
+        (r"géré dans Sophos Central", "n"),
+        (r"Port du XGS relié à la box", "<"),        # recommencer l'étape Internet
+        (r"Port du XGS relié à la box", "Port3"),
+        (r"Votre choix", "1"),
+        (r"Port du XGS relié au switch", "STOP"),    # interruption simulée
+    ])
+
+    def repondre(invite=""):
+        rep = r(invite)
+        if rep == "STOP":
+            raise KeyboardInterrupt
+        return rep
+    monkeypatch.setattr(builtins, "input", repondre)
+    monkeypatch.setattr(getpass, "getpass", repondre)
+    assert assistant.main() == 1
+    brouillon = tmp_path / "clients" / "brouillons" / "garage-test.json"
+    assert brouillon.exists()
+    import json
+    d = json.loads(brouillon.read_text(encoding="utf-8"))
+    assert d["etape"] == 2
+    assert [l["Port"] for l in d["projet"]["lignes"]["Interfaces"]] == ["Port3"]   # pas de doublon après « < »
+
+    # Reprise : on choisit le brouillon, on termine avec les réponses par défaut
+    r2 = Repondeur([(r"Votre choix", "2"), (r"alertes du pare-feu par e-mail", "n"),
+                    (r"Votre choix", "1"), (r"Votre choix", "1"), (r"Votre choix", "2"),
+                    (r"Appliquer la configuration", "n")])
+    monkeypatch.setattr(builtins, "input", r2)
+    monkeypatch.setattr(getpass, "getpass", r2)
+    assert assistant.main() == 0
+    cfg = lire_classeur(str(tmp_path / "clients" / "garage-test.xlsx"))
+    assert cfg.erreurs == []
+    assert any(o.balise == "Interface" and o.cle == "Port3" for o in cfg.operations)
+    assert not brouillon.exists()
