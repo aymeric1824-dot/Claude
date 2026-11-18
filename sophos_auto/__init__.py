@@ -1,3 +1,3 @@
 """Paramétrage automatique des Sophos XGS à partir d'un fichier Excel."""
 
-__version__ = "5.2"
+__version__ = "5.3"

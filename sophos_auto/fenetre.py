@@ -16,6 +16,14 @@ import threading
 ANSI = re.compile(r"\x1b\[([0-9;]*)m")
 COULEURS = {"31": "rouge", "32": "vert", "33": "jaune", "36": "cyan", "90": "gris", "1": "gras"}
 
+# Thèmes de la fenêtre : fond et texte de la zone d'échange, couleurs des messages
+THEMES = {
+    "clair": {"fond": "#fbfbfb", "texte": "#222222", "saisie": "#ffffff", "cadre": "#f0f0f0", "etat": "#555555",
+              "rouge": "#c0392b", "vert": "#1e8449", "jaune": "#b9770e", "cyan": "#1f618d", "gris": "#7f8c8d"},
+    "sombre": {"fond": "#1e1f22", "texte": "#e3e3e3", "saisie": "#2b2d31", "cadre": "#26272b", "etat": "#b0b0b0",
+               "rouge": "#ff6b6b", "vert": "#5fd068", "jaune": "#f0c040", "cyan": "#5dade2", "gris": "#9a9a9a"},
+}
+
 
 def decouper_ansi(texte: str) -> list[tuple[str, tuple[str, ...]]]:
     """Découpe un texte coloré (codes ANSI) en morceaux (texte, styles)."""
@@ -107,6 +115,10 @@ class Application:
         self.en_cours = False
         self.masque = False
         self.redemarrage_en_attente = False
+        from .poste import charger as charger_poste
+        reglages = charger_poste()
+        self.theme = reglages["theme"] if reglages["theme"] in THEMES else "clair"
+        self.taille = max(8, min(20, int(reglages["taille_texte"] or 10)))
 
         gauche = tk.Frame(self.racine, bg="#1f4e78", padx=8, pady=8)
         gauche.pack(side="left", fill="y")
@@ -125,13 +137,17 @@ class Application:
 
         droite = tk.Frame(self.racine, padx=8, pady=8)
         droite.pack(side="left", fill="both", expand=True)
-        self.texte = scrolledtext.ScrolledText(droite, wrap="word", font=("Consolas", 10), bg="#fbfbfb",
-                                               state="disabled")
+        self.droite = droite
+        outils = tk.Frame(droite)
+        outils.pack(fill="x", pady=(0, 6))
+        self.outils = outils
+        for libelle, commande in (("A−", lambda: self.changer_taille(-1)), ("A+", lambda: self.changer_taille(1)),
+                                  ("☾ / ☀ Thème", self.changer_theme), ("📁 Clients", lambda: self.ouvrir("clients")),
+                                  ("📁 Rapports", lambda: self.ouvrir("rapports")),
+                                  ("🗑 Effacer l'écran", self.effacer)):
+            tk.Button(outils, text=libelle, command=commande, relief="groove").pack(side="left", padx=2)
+        self.texte = scrolledtext.ScrolledText(droite, wrap="word", font=("Consolas", self.taille), state="disabled")
         self.texte.pack(fill="both", expand=True)
-        for nom, opts in {"rouge": {"foreground": "#c0392b"}, "vert": {"foreground": "#1e8449"},
-                          "jaune": {"foreground": "#b9770e"}, "cyan": {"foreground": "#1f618d"},
-                          "gris": {"foreground": "#7f8c8d"}, "gras": {"font": ("Consolas", 10, "bold")}}.items():
-            self.texte.tag_configure(nom, **opts)
 
         bas = tk.Frame(droite, pady=6)
         bas.pack(fill="x")
@@ -145,15 +161,80 @@ class Application:
                           command=lambda v=valeur: self.envoyer(self.saisie.get() if v is None else v))
             b.pack(side="left", padx=2)
             self.boutons_reponse.append(b)
-        self.etat = tk.Label(droite, text="Choisissez une action à gauche.", anchor="w", fg="#555")
+        self.etat = tk.Label(droite, text="Choisissez une action à gauche.", anchor="w")
         self.etat.pack(fill="x")
+        self.bas = bas
+        self.appliquer_theme()
+        self.racine.bind("<Control-plus>", lambda e: self.changer_taille(1))
+        self.racine.bind("<Control-equal>", lambda e: self.changer_taille(1))
+        self.racine.bind("<Control-minus>", lambda e: self.changer_taille(-1))
 
         self.ecrire("Bienvenue. Choisissez une action dans la colonne de gauche.\n"
-                    "Astuce : tapez ?? suivi d'un mot (ex. ?? vlan) pour le glossaire.\n\n")
+                    "Astuces : ?? suivi d'un mot (ex. ?? vlan) pour le glossaire ; Ctrl + / Ctrl − pour la taille du texte.\n\n")
+        self.afficher_rappels()
         self.racine.protocol("WM_DELETE_WINDOW", self.quitter)
         self.racine.after(50, self.relever)
         # Les tâches de fond ne gardent jamais de référence à la fenêtre (Tk ne doit être libéré que par le fil principal)
         threading.Thread(target=_verifier_mise_a_jour, args=(self.sorties,), daemon=True).start()
+
+    # ------------------------------------------------------------------ confort
+    def appliquer_theme(self):
+        t = THEMES[self.theme]
+        self.texte.configure(bg=t["fond"], fg=t["texte"], insertbackground=t["texte"],
+                             font=("Consolas", self.taille))
+        for nom in ("rouge", "vert", "jaune", "cyan", "gris"):
+            self.texte.tag_configure(nom, foreground=t[nom])
+        self.texte.tag_configure("gras", font=("Consolas", self.taille, "bold"))
+        for cadre in (self.droite, self.outils, self.bas):
+            cadre.configure(bg=t["cadre"])
+        self.etat.configure(bg=t["cadre"], fg=t["etat"])
+        self.saisie.configure(bg=t["saisie"], fg=t["texte"], insertbackground=t["texte"],
+                              disabledbackground=t["cadre"], font=("Segoe UI", self.taille + 1))
+
+    def _enregistrer_reglages(self):
+        try:
+            from .poste import enregistrer
+            enregistrer({"theme": self.theme, "taille_texte": self.taille})
+        except OSError:
+            pass
+
+    def changer_taille(self, delta: int):
+        self.taille = max(8, min(20, self.taille + delta))
+        self.appliquer_theme()
+        self._enregistrer_reglages()
+
+    def changer_theme(self):
+        self.theme = "sombre" if self.theme == "clair" else "clair"
+        self.appliquer_theme()
+        self._enregistrer_reglages()
+
+    def ouvrir(self, dossier: str):
+        from pathlib import Path
+
+        from .__main__ import ouvrir
+        Path(dossier).mkdir(exist_ok=True)
+        ouvrir(Path(dossier).resolve())
+
+    def effacer(self):
+        self.texte.configure(state="normal")
+        self.texte.delete("1.0", "end")
+        self.texte.configure(state="disabled")
+
+    def afficher_rappels(self):
+        try:
+            from .rappels import calculer
+            rappels = calculer()
+        except Exception:
+            return
+        if not rappels:
+            return
+        self.ecrire(f"\x1b[1mRappels ({len(rappels)}) :\x1b[0m\n")
+        for r in rappels[:8]:
+            couleur = "31" if r.urgence == 1 else "33"
+            self.ecrire(f"  \x1b[{couleur}m•\x1b[0m {r.client} : {r.texte}\n")
+        if len(rappels) > 8:
+            self.ecrire(f"  … et {len(rappels) - 8} autre(s) : bouton « Rappels ».\n")
+        self.ecrire("\n")
 
     # ------------------------------------------------------------------ affichage
     def ecrire(self, t: str):
@@ -245,6 +326,8 @@ class Application:
 
 
 def main() -> int:
+    from .poste import appliquer_dossier_partage
+    appliquer_dossier_partage(lambda t: None)
     Application().demarrer()
     return 0
 

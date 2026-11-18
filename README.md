@@ -44,20 +44,23 @@ Double-cliquez sur **SophosXGS.exe**, ou sur `demarrer.bat`, ou tapez `python -m
 | N° | Fonction |
 |---|---|
 | 1 | Nouveau client, ou reprendre une configuration en cours (assistant) |
-| 2 | Nouveau client à partir d'un client existant (mêmes objets et règles, infos client effacées) |
-| 3 | **Diagnostic de connexion** : câble, adresse, API, IP autorisée, mot de passe — avec la solution |
-| 4 | Appliquer un fichier client (simulation, puis envoi ; mode prudent ; seulement certains onglets) |
-| 5 | Contrôle de sécurité, avec une **note sur 100** et un rapport HTML pour le client |
-| 6 | Conformité : le pare-feu correspond-il toujours à son fichier ? (rapport HTML) |
-| 7 | Revenir en arrière : annuler une application |
-| 8 | Sophos Central : liste, inventaire Excel, sauvegarde d'un ou de **tous** les pare-feux, copie d'un modèle |
-| 9 | **Dossier technique** du client (page HTML imprimable, sans mot de passe) |
-| 10 | Liste des informations à demander au client |
-| 11 | Voir les objets d'un pare-feu |
-| 12 | Fichier Excel vierge |
-| 13 | **Mes paramètres** : nom de votre société (affiché dans les rapports), e-mail du support, valeurs par défaut |
-| 14 | Glossaire : les termes techniques expliqués |
-| 15 | Mise à jour du programme |
+| 2 | **Rappels : ce qu'il faudrait refaire chez vos clients** |
+| 3 | **Historique des interventions d'un client** |
+| 4 | Nouveau client à partir d'un client existant |
+| 5 | **Diagnostic : pourquoi je n'arrive pas à me connecter au pare-feu ?** |
+| 6 | Appliquer un fichier client sur un pare-feu |
+| 7 | **Contrôle de sécurité d'un pare-feu (rapport pour le client)** |
+| 8 | Vérifier qu'un pare-feu correspond toujours à son fichier client |
+| 9 | Revenir en arrière : annuler une application |
+| 10 | Sophos Central : liste, sauvegarde, copie d'un pare-feu modèle |
+| 11 | **Dossier technique d'un client (page à remettre au client)** |
+| 12 | Liste des informations à demander au client avant l'intervention |
+| 13 | Voir les objets d'un pare-feu (règles, hôtes, VPN...) |
+| 14 | Créer un fichier Excel vierge (modèle) |
+| 15 | Ouvrir les dossiers (clients, rapports, sauvegardes) |
+| 16 | **Mes paramètres (nom de ma société, valeurs par défaut)** |
+| 17 | Glossaire : les termes techniques expliqués |
+| 18 | Mise à jour du programme |
 
 ## 2. Préparer le XGS (à chaque boîtier neuf)
 
@@ -198,6 +201,23 @@ Sans la clé maître de stockage sécurisé (SSMK), les mots de passe et donnée
 1. Zero Touch pour la base.
 2. « Copier le pare-feu modèle » pour vos standards.
 3. L'assistant pour les spécificités du client.
+
+## Confort d'utilisation (version 5.3)
+
+- **Historique des interventions** : chaque préparation, application, contrôle de sécurité, vérification de conformité, retour en arrière et sauvegarde Central est noté, avec la date, le technicien, le résultat et le lien vers le rapport. Menu « Historique ».
+- **Rappels** : au démarrage, puis dans le menu « Rappels ». L'outil signale :
+  - les clients jamais contrôlés, ou pas contrôlés depuis 90 jours ;
+  - une note de sécurité faible ;
+  - des écarts de conformité non corrigés ;
+  - une application qui a eu des échecs ;
+  - une sauvegarde Central de plus de 30 jours ;
+  - un firmware trop ancien vu dans Central.
+- **Thème clair ou sombre, taille du texte** : boutons en haut de la fenêtre, ou Ctrl + / Ctrl −. Les choix sont retenus pour le poste.
+- **Boutons 📁 Clients et 📁 Rapports** pour ouvrir les dossiers, et 🗑 pour effacer l'écran.
+- **Travail en équipe** : dans « Mes paramètres », indiquez un dossier partagé (réseau, ou OneDrive / SharePoint synchronisé).
+  - Y sont rangés : les fichiers clients, les rapports, les sauvegardes, l'historique et les paramètres de l'équipe (société, valeurs par défaut).
+  - Restent sur chaque PC : le nom du technicien, le thème, la taille du texte (fichier `parametres_poste.json`).
+  - Si le dossier partagé est inaccessible (hors du bureau), le programme travaille en local et le signale.
 
 ## Nouveautés de la version 5
 

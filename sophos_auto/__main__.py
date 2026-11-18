@@ -175,6 +175,8 @@ def action_dupliquer():
     cible.parent.mkdir(exist_ok=True)
     wb.save(cible)
     print(f"{G}✔ Créé : {cible}{F}")
+    from . import historique
+    historique.enregistrer(nom, "duplication", f"à partir de {Path(source).stem}", fichier=cible)
     conseil("Relisez les onglets Interfaces, VLAN, DHCP, Hôtes, VPN et Redirections : les adresses IP sont celles "
             "de l'ancien client. Les mots de passe ont été remis à *demander*.")
 
@@ -197,7 +199,79 @@ def action_parametres():
                                     "Oui : à chaque démarrage, le programme vérifie sur GitHub et s'installe tout seul "
                                     "(fichier vérifié, ancienne version gardée en secours). Non : il vous prévient seulement."),
     })
-    print(f"{G}✔ Paramètres enregistrés (parametres.json).{F}")
+    print(f"{G}✔ Paramètres de l'équipe enregistrés (parametres.json).{F}")
+
+    from . import poste
+    titre("RÉGLAGES DE CE POSTE")
+    q = poste.charger()
+    info("Le dossier partagé permet à plusieurs techniciens de travailler sur les mêmes clients : mettez-y par "
+         "exemple un dossier réseau (\\\\serveur\\it\\SophosXGS) ou un dossier OneDrive / SharePoint synchronisé. "
+         "Les fichiers clients, rapports, sauvegardes, l'historique et les paramètres de l'équipe y seront rangés.")
+    partage = texte("Dossier partagé entre techniciens (Entrée = aucun, - pour l'enlever)", q["dossier_partage"],
+                    vide_ok=True)
+    partage = "" if partage == "-" else partage
+    poste.enregistrer({
+        "technicien": texte("Votre nom (affiché dans l'historique des interventions)", q["technicien"], vide_ok=True),
+        "dossier_partage": partage,
+        "theme": choix("Thème de la fenêtre", [("clair", "Clair"), ("sombre", "Sombre")],
+                       1 if q["theme"] == "clair" else 2),
+        "taille_texte": int(texte("Taille du texte (8 à 20)", str(q["taille_texte"]),
+                                  valider=lambda t: None if t.isdigit() and 8 <= int(t) <= 20 else "Entre 8 et 20.")),
+    })
+    print(f"{G}✔ Réglages du poste enregistrés.{F} Le dossier partagé et le thème s'appliquent au prochain démarrage.")
+
+
+def action_historique():
+    from . import historique
+    titre("HISTORIQUE DES INTERVENTIONS")
+    noms = historique.clients()
+    if not noms:
+        print(f"{J}Aucune intervention enregistrée pour l'instant.{F}")
+        return
+    c = choix("Quel client ?", [(n, n) for n in noms] + [("tous", "Les 30 dernières interventions, tous clients")], 1)
+    entrees = historique.lire(None if c == "tous" else c)
+    for e in entrees[-30:] if c == "tous" else entrees:
+        ligne = historique.resume(e)
+        if c == "tous":
+            ligne = f"{e.get('client')} — {ligne}"
+        couleur = R if (e.get("echecs") or e.get("ecarts")) else G
+        print(f"  {couleur}•{F} {ligne}")
+        if e.get("rapport"):
+            print(f"      {C}{e['rapport']}{F}")
+
+
+def action_rappels():
+    from .rappels import calculer
+    titre("RAPPELS")
+    rappels = calculer()
+    if not rappels:
+        print(f"{G}✔ Rien à signaler pour vos clients.{F}")
+        return
+    for r in rappels:
+        print(f"  {R + '!' if r.urgence == 1 else J + '•'}{F} {B}{r.client}{F} : {r.texte}")
+
+
+def action_dossiers():
+    titre("DOSSIERS DE TRAVAIL")
+    for nom, lib in (("clients", "Fichiers des clients"), ("rapports", "Rapports"), ("sauvegardes", "Sauvegardes Central")):
+        Path(nom).mkdir(exist_ok=True)
+        print(f"  {lib} : {Path(nom).resolve()}")
+    c = choix("Ouvrir un dossier ?", [("clients", "Clients"), ("rapports", "Rapports"),
+                                      ("sauvegardes", "Sauvegardes"), ("non", "Non")], 4)
+    if c != "non":
+        ouvrir(Path(c).resolve())
+
+
+def ouvrir(chemin: Path) -> None:
+    """Ouvre un dossier ou un fichier avec le programme habituel de Windows."""
+    try:
+        if os.name == "nt":
+            os.startfile(str(chemin))   # noqa: S606 - ouverture volontaire par l'utilisateur
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", str(chemin)])
+    except (OSError, AttributeError) as exc:
+        print(f"{J}Impossible d'ouvrir automatiquement : {exc}. Chemin : {chemin}{F}")
 
 
 def action_glossaire():
@@ -358,6 +432,13 @@ def _rappel(etat):
     print(f"{C}   … {etat}{F}")
 
 
+def _historique_sauvegarde(pf, fichier) -> None:
+    from . import historique
+    from .central import firmware_compatible
+    historique.enregistrer(pf.nom, "sauvegarde_central", f"firmware {pf.firmware}", fichier=fichier,
+                           firmware=pf.firmware, firmware_ancien=firmware_compatible(pf.firmware) is False)
+
+
 def _fichier_sauvegarde(pf) -> Path:
     nom = re.sub(r"[^A-Za-z0-9_-]", "_", pf.nom)
     return Path("sauvegardes") / f"{nom}_{pf.serie}_{dt.datetime.now():%Y-%m-%d_%H%M%S}.tar"
@@ -390,6 +471,8 @@ def action_central():
             elif a == "tous":
                 for pf, r in c.sauvegarder_tous(Path("sauvegardes"), rappel=_rappel):
                     print(f"   {G + '✔' if isinstance(r, Path) else J + '!'}{F} {pf.nom} : {r}")
+                    if isinstance(r, Path):
+                        _historique_sauvegarde(pf, r)
             elif a == "export":
                 if not pfs:
                     continue
@@ -397,6 +480,7 @@ def action_central():
                 if not _verifier_firmware([pf], "à sauvegarder"):
                     continue
                 f = c.exporter(pf.id, _fichier_sauvegarde(pf), rappel=_rappel)
+                _historique_sauvegarde(pf, f)
                 print(f"{G}✔ Configuration enregistrée : {f}{F}")
                 conseil("Ce fichier contient toute la configuration du client : rangez-le dans un endroit protégé.")
             elif a in ("copie", "import"):
@@ -450,6 +534,9 @@ def _importer(c, pfs, depuis_modele: bool):
         fichier = Path(texte("Chemin du fichier .tar", valider=lambda t: None if Path(t).exists() else "Fichier introuvable."))
     ssmk = getpass.getpass("Clé maître SSMK (Entrée si vous ne l'avez pas) : ")
     resultat = c.importer(fichier, [p.id for p in cibles], ssmk, rappel=_rappel)
+    from . import historique
+    for p in cibles:
+        historique.enregistrer(p.nom, "import_central", f"depuis {fichier.name}", fichier=fichier)
     elements = resultat.get("items") if isinstance(resultat, dict) else None
     for e in elements or []:
         nom = next((p.nom for p in cibles if p.id == e.get("firewallId") or p.id == e.get("id")), e.get("firewallId", "?"))
@@ -462,6 +549,8 @@ def _importer(c, pfs, depuis_modele: bool):
 # ----------------------------------------------------------------------------- menu
 MENU = [
     ("assistant", "Nouveau client, ou reprendre une configuration en cours (assistant)", action_assistant),
+    ("rappels", "Rappels : ce qu'il faudrait refaire chez vos clients", action_rappels),
+    ("historique", "Historique des interventions d'un client", action_historique),
     ("dupliquer", "Nouveau client à partir d'un client existant", action_dupliquer),
     ("diagnostic", "Diagnostic : pourquoi je n'arrive pas à me connecter au pare-feu ?", action_diagnostic),
     ("appliquer", "Appliquer un fichier client sur un pare-feu", action_appliquer),
@@ -473,6 +562,7 @@ MENU = [
     ("collecte", "Liste des informations à demander au client avant l'intervention", action_collecte),
     ("lire", "Voir les objets d'un pare-feu (règles, hôtes, VPN...)", action_lire),
     ("modele", "Créer un fichier Excel vierge (modèle)", action_modele),
+    ("dossiers", "Ouvrir les dossiers (clients, rapports, sauvegardes)", action_dossiers),
     ("parametres", "Mes paramètres (nom de ma société, valeurs par défaut)", action_parametres),
     ("glossaire", "Glossaire : les termes techniques expliqués", action_glossaire),
     ("maj", "Mise à jour du programme", action_mise_a_jour),
@@ -481,8 +571,17 @@ MENU = [
 
 
 def main() -> int:
-    if os.name == "nt":
+    if os.name == "nt" and sys.stdout is not None and sys.stdout.isatty():
         os.system("")
+    from .poste import appliquer_dossier_partage
+    appliquer_dossier_partage(lambda t: print(f"{J}{t}{F}"))
+    try:
+        from .rappels import calculer
+        urgents = [r for r in calculer() if r.urgence == 1]
+        if urgents:
+            print(f"{J}{len(urgents)} rappel(s) important(s) : menu « Rappels ».{F}")
+    except Exception:
+        pass
     try:
         from .mise_a_jour import mise_a_jour_automatique
         if mise_a_jour_automatique(lambda t: print(f"{J}{t}{F}"), delai=3):

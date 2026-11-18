@@ -1164,6 +1164,9 @@ def etape_fin(p: Projet) -> None:
         fiche += ["", "Mots de passe générés : affichés une seule fois à l'écran, NON enregistrés dans ce fichier."]
     Path(f"{base}_fiche.txt").write_text("\n".join(fiche) + "\n", encoding="utf-8")
     fiches = ecrire_fiches_annexes(p, base)
+    from . import historique
+    historique.enregistrer(client, "creation", f"{len(p.resume)} élément(s) configuré(s)", fichier=xlsx,
+                           metier=p.metier, situation=p.situation)
     if p.general.get("Rôle haute disponibilité") == "Principal":
         from .schema import GENERAL
         nom_fw = p.general.get("Nom d'hôte du pare-feu") or "fw"

@@ -158,6 +158,10 @@ def restaurer(fichier: str, api: SophosAPI, confirmer=None, simulation: bool = F
     if not rep:
         return 1
     ok, erreurs = appliquer_plan(api, actions)
+    from . import historique
+    client = Path(fichier).stem.replace("_avant", "").rsplit("_", 2)[0]
+    historique.enregistrer(client, "restauration", f"{ok} action(s), {len(erreurs)} échec(s)", echecs=len(erreurs),
+                           etat=fichier)
     print(f"\n{VERT if not erreurs else ROUGE}Restauration : {ok} action(s) réussie(s), {len(erreurs)} échec(s).{FIN}")
     for e in erreurs:
         print(f"{ROUGE}  ✘ {e}{FIN}")

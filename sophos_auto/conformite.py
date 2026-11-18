@@ -138,6 +138,9 @@ def enregistrer_rapport(ecarts, verifies, client, cible) -> "Path":
     Path("rapports").mkdir(exist_ok=True)
     f = Path("rapports") / f"conformite_{re.sub(r'[^A-Za-z0-9_-]', '_', client)}_{dt.datetime.now():%Y-%m-%d_%H%M}.html"
     f.write_text(rapport_html(ecarts, verifies, client, cible), encoding="utf-8")
+    from . import historique
+    historique.enregistrer(client, "conformite", "conforme" if not ecarts else f"{len(ecarts)} écart(s)",
+                           ecarts=len(ecarts), verifies=verifies, pare_feu=cible, rapport=f)
     return f
 
 

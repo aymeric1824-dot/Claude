@@ -301,6 +301,10 @@ def executer(api: SophosAPI, cible: str, client: str = "") -> tuple[list[Constat
         {"client": client, "pare_feu": cible, "date": dt.datetime.now().isoformat(timespec="minutes"),
          "note": note(constats), "constats": [c.__dict__ for c in constats]}, ensure_ascii=False, indent=1),
         encoding="utf-8")
+    from . import historique
+    critiques = sum(1 for x in constats if x.niveau == CRITIQUE)
+    historique.enregistrer(client or cible, "audit", f"note {note(constats)}/100, {critiques} point(s) critique(s)",
+                           note=note(constats), critiques=critiques, pare_feu=cible, rapport=chemin)
     return constats, chemin
 
 

@@ -351,6 +351,7 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
             print(f"\n{n} mot(s) de passe seront demandés au lancement.")
         print(f"\n{VERT}Simulation terminée : rien n'a été envoyé. Requêtes XML dans {dossier}/{FIN}")
         return 0
+    historique_client = client
 
     ip = ip or g["Adresse IP du pare-feu"]
     port = port or int(g["Port d'administration"] or 4444)
@@ -488,6 +489,10 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
                                         charger_parametres().get("societe", "")), encoding="utf-8")
     couleur = VERT if nb_ko == 0 else ROUGE
     print(f"\n{couleur}Terminé : {nb_ok} réussi(s), {nb_ko} échec(s).{FIN} Rapport : {rapport_web}")
+    from . import historique
+    historique.enregistrer(historique_client, "application", f"{nb_ok} réussie(s), {nb_ko} échec(s)",
+                           echecs=nb_ko, pare_feu=f"{ip}:{port}", rapport=rapport_web, etat_avant=photo,
+                           fichier=fichier, prudent=sans_modifier)
     if changement_ip:
         print(f"{JAUNE}L'IP du pare-feu est maintenant {changement_ip.contenu['IPAddress']} : "
               f"remettez votre PC en DHCP (automatique) s'il le faut.{FIN}")

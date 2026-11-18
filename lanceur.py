@@ -3,6 +3,8 @@ import sys
 
 
 def principal() -> int:
+    from sophos_auto.poste import appliquer_dossier_partage
+    appliquer_dossier_partage(lambda t: None)
     if "--console" not in sys.argv:
         try:
             from sophos_auto.fenetre import main as fenetre

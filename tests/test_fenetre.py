@@ -36,6 +36,12 @@ def test_fenetre_lance_une_action_et_repond(tmp_path, monkeypatch):
     assert pomper(lambda: str(app.saisie.cget("state")) == "normal")
     app.envoyer("")                                                       # retour au menu
     assert pomper(lambda: not app.en_cours)
+    app.changer_theme()                          # thème sombre puis taille du texte, enregistrés pour le poste
+    app.changer_taille(2)
+    from sophos_auto.poste import charger
+    assert charger()["theme"] == "sombre" and charger()["taille_texte"] == 12
+    app.effacer()
+    assert app.texte.get("1.0", "end").strip() == ""
     time.sleep(0.2)                     # laisse finir le fil de l'action
     app.racine.destroy()
     app = None  # noqa: F841 - libère la fenêtre dans le fil principal
