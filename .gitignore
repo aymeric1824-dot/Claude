@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+simulation/
+rapports/
+# Fichiers clients : ne jamais les publier (IP, noms de serveurs...)
+clients/
