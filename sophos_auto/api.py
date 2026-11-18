@@ -124,8 +124,8 @@ class SophosAPI:
             corps = f"<Get><{balise}></{balise}></Get>"
         reponse = self._requete(corps)
         contenu = reponse.get(balise)
-        if isinstance(contenu, dict) and "Status" in contenu and len(contenu) <= 2:
-            return None  # "Number of records Zero."
+        if isinstance(contenu, dict) and set(contenu) <= {"Status", "@transactionid"}:
+            return None  # « Number of records Zero. » : la balise ne contient qu'un statut
         return contenu
 
     def noms(self, balise: str, champ: str = "Name") -> set[str]:

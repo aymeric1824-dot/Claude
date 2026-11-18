@@ -12,6 +12,7 @@ import socket
 import sys
 
 import requests
+import urllib3
 
 from .api import ErreurAPI, ErreurConnexion, SophosAPI
 
@@ -59,6 +60,7 @@ def diagnostiquer(ip: str, port: int = 4444, utilisateur: str = "admin", mot_de_
                 "votre PC est dans le même réseau (ipconfig). Sur un XGS neuf : IP 172.16.16.16, port 4444. "
                 "Depuis une zone non LAN, l'administration HTTPS doit être autorisée dans la zone.")
         return etapes
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)   # certificat auto-signé d'usine
     try:
         requests.get(f"https://{ip}:{port}/", verify=False, timeout=10)
         ajouter(True, "L'interface web du pare-feu répond (HTTPS)")

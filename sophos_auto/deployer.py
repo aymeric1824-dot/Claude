@@ -20,8 +20,8 @@ from .api import ErreurAPI, ErreurConnexion, Resultat, SophosAPI, to_xml
 from .modele import ETAPES, Configuration, Operation, Secret, lire_classeur
 
 VERT, ROUGE, JAUNE, GRIS, GRAS, FIN = "\033[32m", "\033[31m", "\033[33m", "\033[90m", "\033[1m", "\033[0m"
-if os.name == "nt":
-    os.system("")  # active les couleurs dans la console Windows
+if os.name == "nt" and sys.stdout is not None and sys.stdout.isatty():
+    os.system("")  # active les couleurs dans la console Windows (jamais en mode fenêtre)
 
 # Où chercher les noms existants sur le pare-feu, par type de référence
 SOURCES_NOMS = {
@@ -386,6 +386,7 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
         print(f"{ROUGE}✘ Impossible de lire l'état actuel : {exc}{FIN}")
         return 1
 
+    fichier_trace = None
     if debug:
         trace = Path("rapports") / f"{_fichier(client)}_{horodatage}_debug.log"
         fichier_trace = trace.open("a", encoding="utf-8")
@@ -406,11 +407,11 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
     reussies: list[Operation] = []
     reconnecte = False
     for o in cfg.operations:
-        if o.etape == ETAPES["après"] and not reconnecte:
+        if o.etape >= ETAPES["après"] and changement_ip and not reconnecte:
             reconnecte = True
-            api2 = _reconnexion(api, changement_ip, ip_pc_apres, confirmer) if changement_ip else None
+            api2 = _reconnexion(api, changement_ip, ip_pc_apres, confirmer)
             if api2 is None:
-                reste = [x for x in cfg.operations if x.etape == ETAPES["après"]]
+                reste = [x for x in cfg.operations if x.etape >= ETAPES["après"]]
                 journal += [f"NON FAIT {x.libelle} (pas de reconnexion)" for x in reste]
                 nb_ko += len(reste)
                 print(f"{JAUNE}Relancez le script avec --ip {changement_ip.contenu['IPAddress'] if changement_ip else ''} "
@@ -443,8 +444,9 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
             journal.append(f"À FAIRE {o.libelle} — {o.conseil_echec} ({res.code} : {res.message})")
         else:
             nb_ko += 1
-            print(f"{rang} {ROUGE}✘ {o.libelle} — {res.code} : {res.message}{FIN}")
-            journal.append(f"ERREUR {o.libelle} — {res.code} : {res.message}")
+            aide = f" — à faire à la main : {o.conseil_echec}" if o.conseil_echec else ""
+            print(f"{rang} {ROUGE}✘ {o.libelle} — {res.code} : {res.message}{aide}{FIN}")
+            journal.append(f"ERREUR {o.libelle} — {res.code} : {res.message}{aide}")
 
     print("\nVérification : relecture du pare-feu...")
     try:
@@ -470,6 +472,9 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
     except ErreurAPI as exc:
         print(f"{JAUNE}  Contrôle de sécurité impossible : {exc}{FIN}")
 
+    if fichier_trace:
+        api.journal = None
+        fichier_trace.close()
     Path("rapports").mkdir(exist_ok=True)
     rapport = Path("rapports") / f"{_fichier(client)}_{horodatage}.txt"
     rapport.write_text(

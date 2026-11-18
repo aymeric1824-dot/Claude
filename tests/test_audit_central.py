@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from sophos_auto import api as api_mod
-from sophos_auto import central as central_mod
 from sophos_auto.api import SophosAPI
 from sophos_auto.audit import ATTENTION, CRITIQUE, auditer, rapport_html
 from sophos_auto.central import ErreurCentral, SophosCentral

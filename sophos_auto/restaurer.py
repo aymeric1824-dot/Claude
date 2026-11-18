@@ -23,10 +23,13 @@ from .api import ErreurAPI, ErreurConnexion, SophosAPI
 VERT, ROUGE, JAUNE, GRIS, FIN = "\033[32m", "\033[31m", "\033[33m", "\033[90m", "\033[0m"
 
 UNIQUES = {"AdminSettings", "Time", "DNS", "Notification", "BackupRestore", "SNMPAgentConfiguration",
-           "SSLTunnelAccessSettings", "GatewayConfiguration"}
+           "SSLTunnelAccessSettings", "GatewayConfiguration", "OTPSettings", "SSLTLSInspectionSettings"}
+# Réglages qui ne se « remettent » pas automatiquement (action unique ou risquée) : signalés seulement
+NON_RESTAURABLES = {"HAConfigure", "HBCloudRegistration", "EnableCloudCentralManagement"}
 # Ordre de suppression : ce qui utilise d'autres objets d'abord
-ORDRE_SUPPRESSION = ["NATRule", "FirewallRule", "SSLVPNPolicy", "VPNIPSecConnection", "DHCPServer", "User",
-                     "AuthenticationServer", "WirelessNetworks", "IPHostGroup", "FQDNHost", "IPHost", "Services",
+ORDRE_SUPPRESSION = ["NATRule", "FirewallRule", "SSLTLSInspectionRule", "SDWANPolicyRoute", "SSLVPNPolicy",
+                     "VPNIPSecConnection", "DHCPServer", "User", "AuthenticationServer", "WirelessNetworks",
+                     "REDDevice", "QoSPolicy", "IPHostGroup", "CountryGroup", "FQDNHost", "IPHost", "Services",
                      "UnicastRoute", "SNMPCommunity", "VLAN", "Zone"]
 # Ne jamais supprimer ces objets d'origine, même s'ils semblent nouveaux
 INTOUCHABLES = {("Zone", n) for n in ("LAN", "WAN", "DMZ", "VPN", "WiFi", "LOCAL")} | {("User", "admin")}
@@ -55,6 +58,8 @@ def cle(balise: str, e: dict) -> str:
         return f"{e.get('DestinationIP')}/{e.get('Netmask')} via {e.get('Gateway')}"
     if balise == "User":
         return str(e.get("Username") or "")
+    if balise == "REDDevice":
+        return str(e.get("BranchName") or "")
     for sous in ("TunnelPolicy", "Configuration", "ActiveDirectory"):
         if isinstance(e.get(sous), dict):
             return cle(balise, e[sous])
@@ -66,6 +71,8 @@ def cle_suppression(balise: str, e: dict) -> dict:
         return {k: e.get(k) for k in ("DestinationIP", "Netmask", "Gateway", "Interface") if e.get(k)}
     if balise == "AuthenticationServer":
         return {"ActiveDirectory": {"ServerName": cle(balise, e)}}
+    if balise == "REDDevice":
+        return {"BranchName": cle(balise, e)}
     return {"Name": cle(balise, e)}
 
 
@@ -81,7 +88,7 @@ def plan(api: SophosAPI, avant: dict) -> list[Action]:
     actions: list[Action] = []
     remises: list[Action] = []
     for balise, contenu_avant in avant.items():
-        if isinstance(contenu_avant, str):      # lecture impossible au moment de la photo
+        if isinstance(contenu_avant, str) or balise in NON_RESTAURABLES:   # illisible, ou à défaire à la main
             continue
         maintenant = api.lire(balise)
         if balise in UNIQUES:

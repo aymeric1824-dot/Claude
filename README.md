@@ -50,6 +50,8 @@ Double-cliquez sur **SophosXGS.exe**, ou sur `demarrer.bat`, ou tapez `python -m
 | 11 | Voir les objets d'un pare-feu |
 | 12 | Fichier Excel vierge |
 | 13 | **Mes paramètres** : nom de votre société (affiché dans les rapports), e-mail du support, valeurs par défaut |
+| 14 | Glossaire : les termes techniques expliqués |
+| 15 | Mise à jour du programme |
 
 ## 2. Préparer le XGS (à chaque boîtier neuf)
 
@@ -134,7 +136,7 @@ Si l'adresse du pare-feu sur le LAN change, ce changement est fait **en dernier*
 
 On peut **relancer sans risque** : ce qui existe déjà est mis à jour, rien n'est créé en double.
 
-### Revenir en arrière (menu 5)
+### Revenir en arrière (menu « Revenir en arrière »)
 
 Choisissez l'application à annuler, d'après les fichiers `*_avant.json` du dossier `rapports`.
 - Les objets créés depuis sont **supprimés**.
@@ -142,7 +144,7 @@ Choisissez l'application à annuler, d'après les fichiers `*_avant.json` du dos
 
 Le plan s'affiche d'abord et une confirmation est demandée. En ligne de commande : `python -m sophos_auto.restaurer rapports/<fichier>_avant.json --ip <IP>`.
 
-### Conformité (menu 4)
+### Conformité (menu « Vérifier qu'un pare-feu correspond toujours à son fichier »)
 
 Compare un pare-feu à son fichier client, en lecture seule. C'est utile après le passage de quelqu'un d'autre, ou plusieurs mois plus tard : l'outil liste ce qui **manque** et ce qui a été **modifié**. Pour remettre en conformité, il suffit de ré-appliquer le fichier.
 
@@ -152,7 +154,7 @@ Compare un pare-feu à son fichier client, en lecture seule. C'est utile après 
 
 ## 5. Contrôle de sécurité
 
-Menu 3, ou `python -m sophos_auto.audit --ip 192.168.1.254 --client "Dupont"`. Il fonctionne sur **n'importe quel XGS, même ancien ou configuré par quelqu'un d'autre**, en lecture seule.
+Menu « Contrôle de sécurité », ou `python -m sophos_auto.audit --ip 192.168.1.254 --client "Dupont"`. Il fonctionne sur **n'importe quel XGS, même ancien ou configuré par quelqu'un d'autre**, en lecture seule.
 
 Il signale notamment :
 - l'administration ouverte sur Internet ;
@@ -206,7 +208,7 @@ Sans la clé maître de stockage sécurisé (SSMK), les mots de passe et donnée
 | Contrôles de sécurité | Menu Contrôle de sécurité | Profils VPN dépassés (DES, 3DES, MD5, DH 1/2/5) ; VPN et administration sans double authentification |
 | Modèles par métier | Assistant, question « Secteur d'activité » | Santé, cabinet, commerce, école, industrie : VLAN conseillés, réglages par défaut et points de vigilance dans la fiche |
 | Coffre KeePass | Fin de l'assistant | Tous les mots de passe du client dans un fichier `.kdbx` chiffré (KeePass ou KeePassXC) |
-| Glossaire | Menu, ou `?? mot` à n'importe quelle question | 50 termes expliqués simplement |
+| Glossaire | Menu, ou `?? mot` à n'importe quelle question | 48 termes expliqués simplement |
 | Mise à jour automatique | Menu « Mise à jour du programme » | Télécharge et installe la nouvelle version depuis GitHub |
 
 Remarques :

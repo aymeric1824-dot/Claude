@@ -25,8 +25,9 @@ TITRES = {
     "Comptes": "Comptes", "VPN sites": "VPN entre sites", "Redirections": "Accès depuis Internet",
     "Règles": "Règles de pare-feu",
 }
-SECTIONS_GENERAL = {"▸ Heure et DNS", "▸ Alertes par e-mail", "▸ Sauvegarde automatique", "▸ Supervision SNMP",
-                    "▸ VPN télétravail (SSL VPN)", "▸ Active Directory", "▸ Sophos Central", "▸ Deuxième accès Internet"}
+# Toutes les sections de l'onglet Général, sauf celles qui ne concernent que le script (identification, connexion)
+SECTIONS_EXCLUES = {"▸ Identification", "▸ Connexion au pare-feu (pour le script)"}
+SECTIONS_GENERAL = {p for p, *_ in GENERAL if p.startswith("▸") and p not in SECTIONS_EXCLUES}
 
 
 def _v(x) -> str:
@@ -54,7 +55,7 @@ def generer(fichier: str, destination: str | None = None) -> Path:
             section, lignes = param, []
             continue
         val = g.get(param, "")
-        if not val or val in ("Non", "Jamais"):
+        if not val or val in ("Non", "Jamais", "Aucun"):
             continue
         if param in secrets_generaux:
             val = "(dans le coffre-fort)"

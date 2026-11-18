@@ -680,12 +680,24 @@ SANS_NOM = {"Interfaces", "VLAN", "Routes", "Réservations DHCP", "Comptes"}
 
 # ----------------------------------------------------------------------------- onglet Général
 def _general(cfg: Configuration) -> None:
-    g = cfg.general
-    G = "Général"
+    """Chaque section de l'onglet Général est traitée séparément : une erreur dans l'une n'empêche pas les autres."""
+    for section in (_g_systeme, _g_alertes, _g_sauvegarde, _g_snmp, _g_ad, _g_secours, _g_vpn, _g_pays, _g_otp,
+                    _g_inspection, _g_ha, _g_central):
+        try:
+            section(cfg)
+        except ErreurLigne as exc:
+            cfg.erreurs.append(f"[Général] {exc}")
 
+
+def _op_general(cfg: Configuration):
     def op(nom, balise, contenu, **kw):
         kw.setdefault("etape", ETAPES["système"])
-        return cfg.ajouter(Operation(G, 0, nom, balise, contenu, kw.pop("etape"), **kw))
+        return cfg.ajouter(Operation("Général", 0, nom, balise, contenu, kw.pop("etape"), **kw))
+    return op
+
+
+def _g_systeme(cfg):
+    g, op = cfg.general, _op_general(cfg)
 
     if g["Nom d'hôte du pare-feu"]:
         op("Nom d'hôte", "AdminSettings", {"HostnameSettings": {"HostName": g["Nom d'hôte du pare-feu"],
@@ -700,6 +712,10 @@ def _general(cfg: Configuration) -> None:
     if dns:
         op("Serveurs DNS", "DNS", {"IPv4Settings": {"ObtainDNSFrom": "Static",
                                                     "DNSIPList": {f"DNS{i}": d for i, d in enumerate(dns, 1)}}}, mode="maj")
+
+
+def _g_alertes(cfg):
+    g, op = cfg.general, _op_general(cfg)
     if g["Serveur SMTP"]:
         if not (g["Adresse expéditeur"] and g["Destinataire des alertes"]):
             raise ErreurLigne("alertes e-mail : indiquez l'adresse expéditeur et le destinataire")
@@ -712,6 +728,10 @@ def _general(cfg: Configuration) -> None:
         contenu.update(SenderAddress=g["Adresse expéditeur"], Recepient=g["Destinataire des alertes"],
                        ConnectionSecurity=secu, IPSecTunnelStatusChangeNotification="Enable")
         op("Alertes e-mail", "Notification", contenu, mode="maj")
+
+
+def _g_sauvegarde(cfg):
+    g, op = cfg.general, _op_general(cfg)
     freq = {"Quotidienne": "Daily", "Hebdomadaire": "Weekly", "Mensuelle": "Monthly"}.get(g["Fréquence de sauvegarde"])
     if freq:
         mode = {"E-mail": "Mail", "FTP": "FTP", "Locale": "Local"}.get(g["Destination de la sauvegarde"], "Mail")
@@ -727,6 +747,10 @@ def _general(cfg: Configuration) -> None:
                  EncryptionPassword=_secret(g["Mot de passe de chiffrement de la sauvegarde"],
                                             "Mot de passe de chiffrement des sauvegardes"))
         op("Sauvegarde automatique", "BackupRestore", {"ScheduleBackup": s}, mode="maj")
+
+
+def _g_snmp(cfg):
+    g, op = cfg.general, _op_general(cfg)
     if _oui(g["SNMP activé"]):
         if not (g["Communauté SNMP"] and g["IP du serveur de supervision"]):
             raise ErreurLigne("SNMP : indiquez la communauté et l'IP du serveur de supervision")
@@ -739,6 +763,10 @@ def _general(cfg: Configuration) -> None:
             "TrapSupportv1": "Disable", "TrapSupportv2c": "Enable"})
         op("SNMP autorisé depuis le LAN", "Zone", {"ApplianceAccess": {"OtherServices": {"SNMP": "Enable"}}},
            mode="patch", cle="LAN", etape=ETAPES["zones"])
+
+
+def _g_ad(cfg):
+    g, op = cfg.general, _op_general(cfg)
     if g["AD : adresse IP"]:
         if not (g["AD : domaine"] and g["AD : compte de service"]):
             raise ErreurLigne("Active Directory : indiquez le domaine et le compte de service")
@@ -750,6 +778,10 @@ def _general(cfg: Configuration) -> None:
             "ConnectionSecurity": "Simple", "ValidCertReq": "Disable", "DisplayNameAttribute": "", "EmailAddressAttribute": "mail",
             "DomainName": domaine, "SearchQueries": {"Query": ",".join(f"dc={p}" for p in domaine.split("."))}}},
            etape=ETAPES["comptes"])
+
+
+def _g_secours(cfg):
+    g, op = cfg.general, _op_general(cfg)
     if g["Port WAN de secours"]:
         port = g["Port WAN de secours"]
         op(f"Lien de secours {port}", "GatewayConfiguration",
@@ -757,12 +789,23 @@ def _general(cfg: Configuration) -> None:
             "ActionOnFailback": "ServeAllConnections"},
            mode="patch", cle=g["Passerelle de secours"] or f"{port}_GW", sous_liste="Gateway",
            etape=ETAPES["routes"], refs=[("passerelle", g["Passerelle de secours"] or f"{port}_GW")])
-    if _oui(g["VPN télétravail activé"]):
+
+
+def _g_vpn(cfg):
+    if _oui(cfg.general["VPN télétravail activé"]):
         _vpn_nomade(cfg)
+
+
+def _g_pays(cfg):
+    g = cfg.general
     if g.get("Pays bloqués"):
         groupe = groupe_pays(cfg, "PAYS-BLOQUES", g["Pays bloqués"], "Pays dont tout le trafic est refusé")
-        regle(cfg, G, 0, "Blocage des pays interdits", action="Drop", zones_src=["WAN"], reseaux_src=[groupe],
+        regle(cfg, "Général", 0, "Blocage des pays interdits", action="Drop", zones_src=["WAN"], reseaux_src=[groupe],
               position="Top", description="Refuse tout trafic venant des pays bloqués")
+
+
+def _g_otp(cfg):
+    g, op = cfg.general, _op_general(cfg)
     if _oui(g.get("Double authentification VPN")) or _oui(g.get("Double authentification administrateurs")):
         vpn, admin = _oui(g.get("Double authentification VPN")), _oui(g.get("Double authentification administrateurs"))
         op("Double authentification", "OTPSettings",
@@ -771,8 +814,12 @@ def _general(cfg: Configuration) -> None:
             "otpWebAdmin": "1" if admin else "0", "otpIPsec": "0"},
            mode="maj", etape=ETAPES["après"] + 1 if admin else ETAPES["comptes"] + 1, facultatif=admin,
            conseil_echec="activez les codes à usage unique dans Authentification > Mot de passe à usage unique")
+
+
+def _g_inspection(cfg):
+    g, op = cfg.general, _op_general(cfg)
     if _oui(g.get("Inspection HTTPS activée")):
-        reseaux = [cfg.reseau(r, G, 0) for r in _liste(g.get("Réseaux à inspecter"))]
+        reseaux = [cfg.reseau(r, "Général", 0) for r in _liste(g.get("Réseaux à inspecter"))]
         profil = g.get("Profil de déchiffrement") or "Maximum compatibility"
         op("Moteur d'inspection HTTPS", "SSLTLSInspectionSettings",
            {"SSLTLSEngine": "Enabled", "SSLTLSInspection": "Enabled"}, mode="patch", etape=ETAPES["règles"])
@@ -784,6 +831,10 @@ def _general(cfg: Configuration) -> None:
         contenu["DestinationZones"] = {"Zone": ["WAN"]}
         op("INSPECTION-HTTPS", "SSLTLSInspectionRule", contenu, etape=ETAPES["règles"] + 1,
            refs=[("decryptprofile", profil)] + [("reseau", r) for r in reseaux])
+
+
+def _g_ha(cfg):
+    g, op = cfg.general, _op_general(cfg)
     role = g.get("Rôle haute disponibilité") or "Aucun"
     if role in ("Principal", "Secondaire"):
         if not g.get("Port de liaison HA"):
@@ -795,6 +846,10 @@ def _general(cfg: Configuration) -> None:
             "Passphrase": _secret(g.get("Phrase secrète HA"), "Phrase secrète de la haute disponibilité")}},
            mode="maj", etape=ETAPES["central"] + 1, facultatif=True,
            conseil_echec="configurez la HA dans Système > Haute disponibilité (mode rapide), même phrase secrète des deux côtés")
+
+
+def _g_central(cfg):
+    g, op = cfg.general, _op_general(cfg)
     if _oui(g["Inscrire dans Sophos Central"]):
         if not g["Central : e-mail du compte"]:
             raise ErreurLigne("Sophos Central : indiquez l'e-mail du compte Central")
@@ -838,6 +893,10 @@ def _vpn_nomade(cfg: Configuration) -> None:
           zones_dst=["LAN"], reseaux_dst=reseaux, description="Postes en télétravail")
 
 
+# Paramètres dont la valeur vide veut dire « ne pas modifier » (et non « valeur par défaut »)
+VIDE_NE_PAS_MODIFIER = {"Fuseau horaire"}
+
+
 # ----------------------------------------------------------------------------- lecture du classeur
 def lire_classeur(chemin: str) -> Configuration:
     cfg = Configuration()
@@ -847,9 +906,12 @@ def lire_classeur(chemin: str) -> Configuration:
         for row in wb["Général"].iter_rows(min_row=2, values_only=True):
             if row and _txt(row[0]) and not _txt(row[0]).startswith("▸"):
                 cfg.general[_txt(row[0])] = _txt(row[1] if len(row) > 1 else "")
+    presents = set(cfg.general)
     for param, defaut, *_ in GENERAL:
         if param.startswith("▸"):
             continue
+        if param in VIDE_NE_PAS_MODIFIER and param in presents:
+            continue      # laissé vide exprès : le réglage du pare-feu n'est pas touché
         if not cfg.general.get(param):
             cfg.general[param] = defaut
 
@@ -888,10 +950,7 @@ def lire_classeur(chemin: str) -> Configuration:
                         o.ligne = num
             except ErreurLigne as exc:
                 cfg.erreurs.append(f"{ref} {exc}")
-    try:
-        _general(cfg)
-    except ErreurLigne as exc:
-        cfg.erreurs.append(f"[Général] {exc}")
+    _general(cfg)
 
     _doublons(cfg)
     _coherence(cfg)
@@ -1005,8 +1064,6 @@ def _verifier_references(cfg: Configuration) -> None:
             if type_ in ("webfilter", "appfilter", "ips", "vpnprofile", "passerelle", "decryptprofile"):
                 continue  # stratégies d'origine : vérifiées sur le pare-feu au lancement
             if type_ == "interface" and re.fullmatch(r"Port\d+(\.\d+)?", nom):
-                continue
-            if type_ in ("decryptprofile", "qos") and cfg.defini(type_, nom):
                 continue
             quoi = {"decryptprofile": "profil de déchiffrement", "qos": "priorité",
                     "zone": "zone", "reseau": "réseau", "service": "service", "webfilter": "stratégie web",

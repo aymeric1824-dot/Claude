@@ -287,11 +287,18 @@ def _suivant_reseau(p: Projet) -> ipaddress.IPv4Interface:
 
 
 def _plage_dhcp(iface: ipaddress.IPv4Interface) -> tuple[str, str]:
-    hosts = list(iface.network.hosts())
-    if len(hosts) >= 200:
-        return str(hosts[99]), str(hosts[198])
-    tiers = max(1, len(hosts) // 3)
-    return str(hosts[tiers]), str(hosts[-3])
+    """Plage proposée : .100 à .199 sur un /24 (ou équivalent), jamais l'adresse du pare-feu."""
+    reseau = iface.network
+    premier, dernier = int(reseau.network_address) + 1, int(reseau.broadcast_address) - 1
+    taille = dernier - premier + 1
+    if taille >= 200:
+        debut, fin = premier + 99, premier + 198
+    else:
+        debut, fin = premier + max(1, taille // 3), dernier - 2
+    ip = int(iface.ip)
+    if debut <= ip <= fin:     # le pare-feu est dans la plage : on la place du plus grand côté de son adresse
+        debut, fin = (ip + 1, fin) if fin - ip >= ip - debut else (debut, ip - 1)
+    return str(ipaddress.IPv4Address(debut)), str(ipaddress.IPv4Address(fin))
 
 
 def _slug(t: str) -> str:
@@ -493,7 +500,9 @@ def etape_lan(p: Projet, situation: str) -> None:
     elif str(iface.ip) != "172.16.16.16" or p.lan_port != "Port1":
         p.ligne("Interfaces", Port=p.lan_port, Zone="LAN", Mode="Statique", **{"Adresse IP": str(iface.ip),
                 "Masque": str(iface.netmask), "Description": "Réseau local"})
-        pc = str(list(iface.network.hosts())[-5])
+        pc = str(iface.network.broadcast_address - 5)
+        if pc == str(iface.ip):
+            pc = str(iface.network.broadcast_address - 6)
         p.general["_ip_pc_apres"] = pc
         p.a_faire.insert(0, f"AVANT de lancer : dans Sauvegarde et firmware > API, autorisez l'IP actuelle de votre PC "
                             f"ET l'adresse {pc} (le script vous demandera de passer votre PC sur cette adresse quand "
@@ -1199,7 +1208,7 @@ def etape_fin(p: Projet) -> None:
     if not oui_non("Appliquer la configuration sur le pare-feu maintenant ?", False,
                    "Le PC doit être branché sur le pare-feu, l'assistant de démarrage Sophos terminé et l'API activée "
                    "(Sauvegarde et firmware > API, avec l'IP de votre PC autorisée)."):
-        print(f"\nPlus tard : {B}python -m sophos_auto.deployer {xlsx}{F}  (ou glissez le fichier sur lancer.bat)")
+        print(f"\nPlus tard : menu {B}« Appliquer un fichier client »{F} et choisissez {Path(xlsx).stem}.")
         return
     from .deployer import deployer
     print()
@@ -1269,7 +1278,8 @@ def _ecrire_secrets(p: Projet) -> None:
             lib = {"Mot de passe SMTP": "Mot de passe SMTP", "Mot de passe FTP": "Mot de passe FTP",
                    "Mot de passe de chiffrement de la sauvegarde": "Mot de passe de chiffrement des sauvegardes",
                    "AD : mot de passe": "Mot de passe du compte de service AD",
-                   "Central : mot de passe": "Mot de passe du compte Sophos Central"}.get(k)
+                   "Central : mot de passe": "Mot de passe du compte Sophos Central",
+                   "Phrase secrète HA": "Phrase secrète de la haute disponibilité"}.get(k)
             if lib in p.secrets:
                 p.general[k] = p.secrets[lib]
 

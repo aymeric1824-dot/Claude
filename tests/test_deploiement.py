@@ -88,6 +88,6 @@ def test_mauvais_mot_de_passe(modele, faux, monkeypatch):
 def test_simulation_n_envoie_rien(modele, faux):
     assert main([modele, "--simulation"]) == 0
     assert faux.requetes == []
-    fichiers = list((faux_dir := __import__("pathlib").Path("simulation")).rglob("*.xml"))
+    fichiers = list(__import__("pathlib").Path("simulation").rglob("*.xml"))
     assert len(fichiers) > 10
     assert all("MotDePasse" not in f.read_text(encoding="utf-8") for f in fichiers)

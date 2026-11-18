@@ -12,6 +12,7 @@ import getpass
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from .api import ErreurAPI, SophosAPI
 from .deployer import _remplacer

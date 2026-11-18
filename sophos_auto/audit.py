@@ -180,7 +180,9 @@ def auditer(api: SophosAPI) -> list[Constat]:
             if p.get("ScanVirus") != "Enable":
                 manque.append("antivirus")
             if manque:
-                c.append(Constat(ATTENTION, f"Accès Internet sans protection complète : « {nom} »",
+                # sans aucune protection : à corriger ; avec au moins le filtrage web ou l'IPS : simple conseil
+                grave = "filtrage web" in manque and "IPS" in manque
+                c.append(Constat(ATTENTION if grave else INFO, f"Accès Internet sans protection complète : « {nom} »",
                                  f"Protections absentes : {', '.join(manque)}.",
                                  "Activez-les dans la règle (licences Web et Network Protection nécessaires)."))
         if "WAN" in zs and p.get("LogTraffic") == "Disable":

@@ -38,6 +38,6 @@ def test_fenetre_lance_une_action_et_repond(tmp_path, monkeypatch):
     assert pomper(lambda: not app.en_cours)
     time.sleep(0.2)                     # laisse finir le fil de l'action
     app.racine.destroy()
-    del app
+    app = None  # noqa: F841 - libère la fenêtre dans le fil principal
     import gc
     gc.collect()                        # libère Tk dans le fil principal

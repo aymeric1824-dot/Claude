@@ -4,7 +4,6 @@ import builtins
 import getpass
 
 import pytest
-from openpyxl import load_workbook
 
 from sophos_auto import api as api_mod
 from sophos_auto.api import SophosAPI
@@ -18,8 +17,9 @@ from tests.faux_xgs import FauxXGS
 
 def _fichier(tmp_path, general=None, lignes=None):
     g = dict(GENERAL_EXEMPLE, **(general or {}))
-    l = {k: list(v) for k, v in EXEMPLES.items()}
-    for k, v in (lignes or {}).items():
+    import copy
+    l = copy.deepcopy(EXEMPLES)          # ne jamais modifier le modèle partagé
+    for k, v in copy.deepcopy(lignes or {}).items():
         l[k] = v
     for onglet in l:
         for ligne in l[onglet]:

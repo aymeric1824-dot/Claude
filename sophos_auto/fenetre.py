@@ -147,8 +147,8 @@ class Application:
         self.etat = tk.Label(droite, text="Choisissez une action à gauche.", anchor="w", fg="#555")
         self.etat.pack(fill="x")
 
-        self.ecrire(f"Bienvenue. Choisissez une action dans la colonne de gauche.\n"
-                    f"Astuce : tapez ?? suivi d'un mot (ex. ?? vlan) pour le glossaire.\n\n")
+        self.ecrire("Bienvenue. Choisissez une action dans la colonne de gauche.\n"
+                    "Astuce : tapez ?? suivi d'un mot (ex. ?? vlan) pour le glossaire.\n\n")
         self.racine.protocol("WM_DELETE_WINDOW", self.quitter)
         self.racine.after(50, self.relever)
         # Les tâches de fond ne gardent jamais de référence à la fenêtre (Tk ne doit être libéré que par le fil principal)
