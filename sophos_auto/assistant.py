@@ -116,6 +116,8 @@ def choix(question: str, options: list[tuple[str, str]], defaut: int = 1, aide: 
             continue
         if not rep:
             return options[defaut - 1][0]
+        if rep.lower() == "q" and options[-1][0] in ("quitter", "fin"):
+            return options[-1][0]
         if rep.isdigit() and 1 <= int(rep) <= len(options):
             return options[int(rep) - 1][0]
         print(f"{J}   Tapez un numéro entre 1 et {len(options)}.{F}")
@@ -343,6 +345,16 @@ def etape_intro(p: Projet) -> str:
                                "(Internet, réseau local, DHCP, fuseau). Au premier démarrage, branché sur Internet, le "
                                "boîtier télécharge ces réglages tout seul : plus d'assistant de démarrage en local. "
                                "L'assistant vous donnera la liste exacte des valeurs à saisir dans Central.")
+        if not p.zero_touch and oui_non("Inscrire automatiquement le boîtier dans Sophos Central à la fin ?", True,
+                                        "Le script fait l'inscription (Système > Sophos Central) avec le compte Central "
+                                        "du client, et active l'envoi des sauvegardes dans Central. Si le compte a la "
+                                        "double authentification, l'inscription peut être refusée : l'outil vous dira "
+                                        "alors de la faire à la main."):
+            p.general["Inscrire dans Sophos Central"] = "Oui"
+            p.general["Central : e-mail du compte"] = texte("E-mail du compte Sophos Central", valider=_v_email)
+            v, gen = mot_de_passe("Mot de passe du compte Sophos Central", generer_ok=False)
+            p.general["Central : mot de passe"] = p.secret("Mot de passe du compte Sophos Central", v, gen)
+            p.resume.append("Inscription automatique dans Sophos Central (sauvegardes envoyées dans Central)")
     return situation
 
 
@@ -980,7 +992,8 @@ def _ecrire_secrets(p: Projet) -> None:
         if v == DEMANDER:
             lib = {"Mot de passe SMTP": "Mot de passe SMTP", "Mot de passe FTP": "Mot de passe FTP",
                    "Mot de passe de chiffrement de la sauvegarde": "Mot de passe de chiffrement des sauvegardes",
-                   "AD : mot de passe": "Mot de passe du compte de service AD"}.get(k)
+                   "AD : mot de passe": "Mot de passe du compte de service AD",
+                   "Central : mot de passe": "Mot de passe du compte Sophos Central"}.get(k)
             if lib in p.secrets:
                 p.general[k] = p.secrets[lib]
 

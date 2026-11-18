@@ -124,6 +124,11 @@ class SophosAPI:
         reponse = self._requete(corps)
         return analyser_statut(reponse, balise)
 
+    def supprimer(self, balise: str, cle: dict) -> Resultat:
+        """Supprime un objet. cle = champs qui l'identifient, ex. {"Name": "SRV-01"}."""
+        reponse = self._requete(f"<Remove>{to_xml({balise: cle})}</Remove>")
+        return analyser_statut(reponse, balise)
+
     def ecrire_ou_mettre_a_jour(self, balise: str, contenu: dict) -> tuple[Resultat, str]:
         """Crée l'objet ; s'il existe déjà, le met à jour. Renvoie (résultat, 'créé'|'mis à jour')."""
         res = self.ecrire(balise, contenu, "add")

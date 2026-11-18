@@ -16,6 +16,12 @@ Un outil pour configurer un pare-feu **Sophos XGS**, **même sans être expert**
 
 ## 1. Installation (une seule fois sur le PC)
 
+**Le plus simple — sans rien installer :**
+1. Téléchargez le programme Windows `SophosXGS.exe` : sur GitHub, onglet **Actions**, dernière exécution réussie de « Tests et programme Windows », section **Artifacts**, fichier **SophosXGS-windows**.
+2. Décompressez-le, puis double-cliquez sur **SophosXGS.exe**. Le programme crée ses dossiers (`clients`, `rapports`, `sauvegardes`) à côté de lui.
+
+**Ou avec Python :**
+
 1. Installez **Python 3.10 ou plus récent** depuis <https://www.python.org/downloads/>.
    Sous Windows, **cochez « Add Python to PATH »** pendant l'installation.
 2. Téléchargez ce dossier (bouton *Code > Download ZIP* sur GitHub), puis décompressez-le.
@@ -30,11 +36,14 @@ Double-cliquez sur **`demarrer.bat`**, ou tapez `python -m sophos_auto` :
  1. Nouveau client, ou reprendre une configuration en cours (assistant)
  2. Appliquer un fichier client sur un pare-feu
  3. Contrôle de sécurité d'un pare-feu (rapport pour le client)
- 4. Sophos Central : liste, sauvegarde, copie d'un pare-feu modèle
- 5. Liste des informations à demander au client avant l'intervention
- 6. Voir les objets d'un pare-feu (règles, hôtes, VPN...)
- 7. Créer un fichier Excel vierge (modèle)
+ 4. Vérifier qu'un pare-feu correspond toujours à son fichier client
+ 5. Revenir en arrière : annuler une application
+ 6. Sophos Central : liste, sauvegarde, copie d'un pare-feu modèle
+ 7. Liste des informations à demander au client avant l'intervention
+ 8. Voir les objets d'un pare-feu (règles, hôtes, VPN...)
+ 9. Créer un fichier Excel vierge (modèle)
 ```
+Tapez `q` pour quitter.
 
 ## 2. Préparer le XGS (à chaque boîtier neuf)
 
@@ -119,6 +128,22 @@ Si l'adresse du pare-feu sur le LAN change, ce changement est fait **en dernier*
 
 On peut **relancer sans risque** : ce qui existe déjà est mis à jour, rien n'est créé en double.
 
+### Revenir en arrière (menu 5)
+
+Choisissez l'application à annuler, d'après les fichiers `*_avant.json` du dossier `rapports`.
+- Les objets créés depuis sont **supprimés**.
+- Les réglages modifiés sont **remis comme avant**.
+
+Le plan s'affiche d'abord et une confirmation est demandée. En ligne de commande : `python -m sophos_auto.restaurer rapports/<fichier>_avant.json --ip <IP>`.
+
+### Conformité (menu 4)
+
+Compare un pare-feu à son fichier client, en lecture seule. C'est utile après le passage de quelqu'un d'autre, ou plusieurs mois plus tard : l'outil liste ce qui **manque** et ce qui a été **modifié**. Pour remettre en conformité, il suffit de ré-appliquer le fichier.
+
+### Ce qui est maintenant automatique
+- **Activation des tunnels IPsec** juste après leur création.
+- **Inscription dans Sophos Central**, avec l'envoi des sauvegardes dans Central (question de l'assistant). Si Central refuse, par exemple à cause de la double authentification, l'outil l'indique comme « À FAIRE » avec la marche à suivre, sans bloquer le reste.
+
 ## 5. Contrôle de sécurité
 
 Menu 3, ou `python -m sophos_auto.audit --ip 192.168.1.254 --client "Dupont"`. Il fonctionne sur **n'importe quel XGS, même ancien ou configuré par quelqu'un d'autre**, en lecture seule.
@@ -192,12 +217,12 @@ Points à vérifier en priorité lors de ce premier essai :
 - noms des stratégies d'origine : `Default Workplace Policy`, `lantowan_general`, `Block generally unwanted apps` et le profil IPsec `IKEv2`. Le script les vérifie et affiche les noms disponibles ;
 - passerelle de secours (nommée `PortX_GW`) ;
 - interfaces Wi-Fi (`wlnet1`, `wlnet2`…) ;
-- activation du tunnel IPsec : elle se fait à la main dans VPN > IPsec ;
+- activation automatique des tunnels IPsec et inscription dans Central : en cas d'échec, l'outil indique quoi faire à la main ;
+- suppression d'un compte utilisateur lors d'un retour en arrière (format de suppression peu clair dans la documentation Sophos) ;
 - export / import par Sophos Central : l'API est récente, faites un premier essai sur deux pare-feux de test.
 
 Restent **manuels**, et sont rappelés dans la fiche :
-- assistant de démarrage, licences, mise à jour du firmware ;
-- Sophos Central ;
+- assistant de démarrage (ou Zero Touch dans Central), activation de l'API, licences, mise à jour du firmware ;
 - configuration des switchs (VLAN) et validation des bornes Wi-Fi ;
 - configuration du pare-feu d'en face pour les VPN entre sites.
 
@@ -218,6 +243,9 @@ Restent **manuels**, et sont rappelés dans la fiche :
 | `sophos_auto/__main__.py` | Le menu principal |
 | `sophos_auto/assistant.py` | L'assistant pas à pas |
 | `sophos_auto/audit.py` | Contrôle de sécurité et rapport HTML |
+| `sophos_auto/restaurer.py` | Revenir en arrière à partir de l'état enregistré |
+| `sophos_auto/conformite.py` | Comparaison pare-feu / fichier client |
+| `.github/workflows/windows.yml` | Tests automatiques et construction de SophosXGS.exe |
 | `sophos_auto/central.py` | Client de l'API Sophos Central (pare-feux, export, import) |
 | `sophos_auto/schema.py` | Description des onglets et colonnes du fichier Excel |
 | `sophos_auto/modele.py` | Contrôles et conversion Excel → requêtes Sophos |

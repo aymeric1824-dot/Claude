@@ -1,0 +1,45 @@
+name: Tests et programme Windows
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  windows:
+    needs: tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pyinstaller
+      - name: Construire SophosXGS.exe
+        run: pyinstaller --onefile --console --name SophosXGS lanceur.py
+      - name: Vérifier que le programme démarre
+        shell: bash
+        run: |
+          cd dist
+          printf 'q\n' | ./SophosXGS.exe > sortie.txt 2>&1 || true
+          cat sortie.txt
+          grep -q "OUTIL DE CONFIGURATION" sortie.txt
+          rm sortie.txt
+      - name: Préparer le dossier à télécharger
+        shell: bash
+        run: |
+          mkdir SophosXGS
+          cp dist/SophosXGS.exe modele_client.xlsx README.md SophosXGS/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SophosXGS-windows
+          path: SophosXGS/

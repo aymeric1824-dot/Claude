@@ -71,6 +71,12 @@ GENERAL: list[tuple[str, str, str, list[str] | None, bool]] = [
     ("AD : mot de passe", DEMANDER, "", None, True),
     ("AD : port", "389", "389 (ou 636 en LDAPS)", None, False),
 
+    ("▸ Sophos Central", "", "", None, False),
+    ("Inscrire dans Sophos Central", "Non", "Oui = le script inscrit le boîtier dans Central (inutile en Zero Touch)", OUI_NON, False),
+    ("Central : e-mail du compte", "", "Compte administrateur Sophos Central du client", None, False),
+    ("Central : mot de passe", DEMANDER, "Si la double authentification bloque, inscrivez le boîtier à la main", None, True),
+    ("Central : sauvegardes", "Oui", "Envoyer les sauvegardes de configuration dans Central", OUI_NON, False),
+
     ("▸ Deuxième accès Internet", "", "", None, False),
     ("Port WAN de secours", "", "Port du lien de secours (vide = pas de secours ; deux liens WAN sans secours = répartition de charge)", None, False),
     ("Passerelle de secours", "", "Nom de la passerelle du lien de secours (Routage > Passerelles). Vide = automatique", None, False),

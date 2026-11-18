@@ -11,7 +11,7 @@ from pathlib import Path
 from .assistant import (FICHE_COLLECTE, Retour, B, C, F, G, J, R, choix, conseil, info, oui_non, texte, titre,
                         _v_ip)
 
-VERSION = "3.0"
+VERSION = "3.1"
 
 
 def _pause():
@@ -37,14 +37,7 @@ def action_assistant():
 
 def action_appliquer():
     from .deployer import deployer
-    fichiers = sorted(Path("clients").glob("*.xlsx")) if Path("clients").exists() else []
-    if fichiers:
-        options = [(str(f), f.stem) for f in fichiers] + [("autre", "Un autre fichier (je donne le chemin)")]
-        f = choix("Quel client ?", options, 1)
-    else:
-        f = "autre"
-    if f == "autre":
-        f = texte("Chemin du fichier Excel", valider=lambda t: None if Path(t).exists() else "Fichier introuvable.")
+    f = _choisir_fichier_client()
     if deployer(f, simulation=True) != 0:
         return
     if oui_non("Envoyer cette configuration au pare-feu ?", False):
@@ -64,6 +57,46 @@ def action_audit():
         return
     afficher(constats)
     print(f"\n{G}Rapport à remettre au client : {chemin}{F}")
+
+
+def _choisir_fichier_client(question="Quel client ?"):
+    fichiers = sorted(Path("clients").glob("*.xlsx")) if Path("clients").exists() else []
+    f = choix(question, [(str(x), x.stem) for x in fichiers] + [("autre", "Un autre fichier (je donne le chemin)")], 1) \
+        if fichiers else "autre"
+    if f == "autre":
+        f = texte("Chemin du fichier Excel", valider=lambda t: None if Path(t).exists() else "Fichier introuvable.")
+    return f
+
+
+def action_conformite():
+    from .api import ErreurAPI
+    from .conformite import afficher, verifier
+    from .modele import lire_classeur
+    titre("CONFORMITÉ : LE PARE-FEU CORRESPOND-IL À SON FICHIER ? (lecture seule)")
+    f = _choisir_fichier_client()
+    api, _ = _connexion_xgs(lire_classeur(f).general.get("Adresse IP du pare-feu") or "172.16.16.16")
+    try:
+        afficher(*verifier(api, f))
+    except (ErreurAPI, ValueError) as exc:
+        print(f"{R}✘ {exc}{F}")
+
+
+def action_restaurer():
+    from .api import ErreurAPI
+    from .restaurer import restaurer
+    titre("REVENIR EN ARRIÈRE")
+    info("Avant chaque application, l'état du pare-feu est enregistré. Choisissez l'application à annuler : les "
+         "objets créés depuis seront supprimés et les réglages modifiés remis comme avant.")
+    photos = sorted(Path("rapports").glob("*_avant.json"), reverse=True) if Path("rapports").exists() else []
+    if not photos:
+        print(f"{J}Aucun état enregistré dans le dossier rapports.{F}")
+        return
+    f = choix("Quelle application annuler ?", [(str(x), x.stem.replace("_avant", "")) for x in photos[:20]], 1)
+    api, _ = _connexion_xgs()
+    try:
+        restaurer(f, api, confirmer=lambda q: oui_non(q, False))
+    except ErreurAPI as exc:
+        print(f"{R}✘ {exc}{F}")
 
 
 def action_lire():
@@ -240,6 +273,8 @@ MENU = [
     ("assistant", "Nouveau client, ou reprendre une configuration en cours (assistant)", action_assistant),
     ("appliquer", "Appliquer un fichier client sur un pare-feu", action_appliquer),
     ("audit", "Contrôle de sécurité d'un pare-feu (rapport pour le client)", action_audit),
+    ("conformite", "Vérifier qu'un pare-feu correspond toujours à son fichier client", action_conformite),
+    ("restaurer", "Revenir en arrière : annuler une application", action_restaurer),
     ("central", "Sophos Central : liste, sauvegarde, copie d'un pare-feu modèle", action_central),
     ("collecte", "Liste des informations à demander au client avant l'intervention", action_collecte),
     ("lire", "Voir les objets d'un pare-feu (règles, hôtes, VPN...)", action_lire),
@@ -251,10 +286,15 @@ MENU = [
 def main() -> int:
     if os.name == "nt":
         os.system("")
+    for flux in (sys.stdout, sys.stderr):
+        try:
+            flux.reconfigure(errors="replace")   # jamais de plantage sur un caractère non affichable
+        except (AttributeError, ValueError):
+            pass
     while True:
         titre(f"SOPHOS XGS — OUTIL DE CONFIGURATION (v{VERSION})")
         try:
-            c = choix("Que voulez-vous faire ?", [(k, lib) for k, lib, _ in MENU], 1)
+            c = choix("Que voulez-vous faire ? (q pour quitter)", [(k, lib) for k, lib, _ in MENU], 1)
             if c == "quitter":
                 return 0
             next(f for k, _, f in MENU if k == c)()

@@ -7,14 +7,14 @@ import requests
 import xmltodict
 
 SINGLETONS = {"AdminSettings", "Time", "DNS", "Notification", "BackupRestore", "SNMPAgentConfiguration",
-              "SSLTunnelAccessSettings", "GatewayConfiguration"}
+              "SSLTunnelAccessSettings", "GatewayConfiguration", "HBCloudRegistration", "EnableCloudCentralManagement"}
 
 
 def cle(balise, contenu):
     if not isinstance(contenu, dict):
         return ""
     if balise == "User":
-        return contenu.get("Username", "")
+        return contenu.get("Username") or contenu.get("Name", "")
     for k in ("Name", "Username", "ServerName"):
         if k in contenu:
             return contenu[k]
@@ -75,6 +75,14 @@ class FauxXGS:
                     corps += f"<{balise}><Status>No. of records Zero.</Status></{balise}>"
                 else:
                     corps += "".join(xmltodict.unparse({balise: e}, full_document=False) for e in elements)
+        if "Remove" in req:
+            for balise, contenu in req["Remove"].items():
+                k = cle(balise, contenu)
+                if k in self.objets.get(balise, {}):
+                    del self.objets[balise][k]
+                    corps += _ok(balise)
+                else:
+                    corps += f'<{balise}><Status code="500">Entity not found.</Status></{balise}>'
         if "Set" in req:
             op = req["Set"]["@operation"]
             for balise, contenu in req["Set"].items():

@@ -354,6 +354,10 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
             reussies.append(o)
             print(f"{VERT}  ✔{FIN} {o.libelle} {GRIS}({action}){FIN}")
             journal.append(f"OK     {o.libelle} ({action})")
+        elif o.facultatif:
+            print(f"{JAUNE}  ! {o.libelle} — non fait automatiquement ({res.code} : {res.message}). "
+                  f"À faire à la main : {o.conseil_echec}{FIN}")
+            journal.append(f"À FAIRE {o.libelle} — {o.conseil_echec} ({res.code} : {res.message})")
         else:
             nb_ko += 1
             print(f"{ROUGE}  ✘ {o.libelle} — {res.code} : {res.message}{FIN}")

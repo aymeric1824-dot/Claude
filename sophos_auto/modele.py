@@ -18,7 +18,7 @@ from .schema import DEMANDER, GENERAL, ONGLETS, SERVICES_ORIGINE, ZONES_ORIGINE
 ETAPES = {
     "système": 10, "zones": 20, "interfaces": 30, "vlan": 35, "routes": 40, "wifi": 45,
     "hôtes": 50, "groupes": 55, "services": 60, "dhcp": 65, "comptes": 70, "vpn": 75,
-    "règles": 80, "nat": 85, "fin": 99, "après": 100,
+    "règles": 80, "nat": 85, "central": 90, "fin": 99, "après": 100,
 }
 
 
@@ -46,6 +46,8 @@ class Operation:
     retirer: list[str] = field(default_factory=list)   # patch : champs à supprimer
     defauts: dict = field(default_factory=dict)       # patch : champs ajoutés seulement s'ils manquent
     existe_ok: bool = False      # « existe déjà » = réussite (ex. routes, sans nom)
+    facultatif: bool = False     # un échec n'est qu'un avertissement (à finir à la main)
+    conseil_echec: str = ""      # que faire à la main si l'opération échoue
 
     @property
     def libelle(self) -> str:
@@ -501,9 +503,13 @@ def _vpn_sites(cfg, c, onglet, ligne):
             "ActionOnVPNRestart": role, "AuthenticationType": "PresharedKey",
             "PresharedKey": _secret(c["Clé partagée"], f"Clé partagée du VPN {nom}"),
             "SubnetFamily": "IPv4", "EndpointFamily": "IPv4", "LocalWANPort": port, "RemoteHost": distant,
-            "LocalSubnet": locaux, "RemoteNetwork": {"Network": distants}, "UserAuthenticationMode": "Disable"}
+            "LocalSubnet": locaux, "RemoteNetwork": {"Network": distants}, "UserAuthenticationMode": "Disable",
+            "ActivateOnSave": "y"}
     cfg.ajouter(Operation(onglet, ligne, nom, "VPNIPSecConnection", {"Configuration": conf}, ETAPES["vpn"],
                           refs=[("vpnprofile", profil), ("interface", port)] + [("reseau", r) for r in locaux + distants]))
+    cfg.ajouter(Operation(onglet, ligne, f"Activation de {nom}", "VPNIPSecConnection", {"Active": {"Name": nom}},
+                          ETAPES["vpn"] + 1, mode="maj", facultatif=True,
+                          conseil_echec=f"activez la connexion {nom} dans VPN > IPsec (bouton Actif)"))
     regle(cfg, onglet, ligne, f"{nom} - sortant", zones_src=["LAN"], reseaux_src=locaux, zones_dst=["VPN"],
           reseaux_dst=distants, description=f"Trafic vers le site distant ({nom})")
     regle(cfg, onglet, ligne, f"{nom} - entrant", zones_src=["VPN"], reseaux_src=distants, zones_dst=["LAN"],
@@ -645,6 +651,18 @@ def _general(cfg: Configuration) -> None:
            etape=ETAPES["routes"], refs=[("passerelle", g["Passerelle de secours"] or f"{port}_GW")])
     if _oui(g["VPN télétravail activé"]):
         _vpn_nomade(cfg)
+    if _oui(g["Inscrire dans Sophos Central"]):
+        if not g["Central : e-mail du compte"]:
+            raise ErreurLigne("Sophos Central : indiquez l'e-mail du compte Central")
+        conseil = "inscrivez le boîtier dans Système > Sophos Central (connexion avec votre compte Central)"
+        op("Inscription dans Sophos Central", "HBCloudRegistration",
+           {"Username": g["Central : e-mail du compte"],
+            "Password": _secret(g["Central : mot de passe"], "Mot de passe du compte Sophos Central")},
+           mode="maj", etape=ETAPES["central"], facultatif=True, conseil_echec=conseil)
+        op("Gestion par Sophos Central", "EnableCloudCentralManagement",
+           {"FWBackup": "BackupEnable" if _oui(g["Central : sauvegardes"], True) else "BackupDisable"},
+           mode="maj", etape=ETAPES["central"], facultatif=True,
+           conseil_echec="dans Système > Sophos Central, activez « Gestion par Sophos Central » puis acceptez dans Central")
 
 
 def _vpn_nomade(cfg: Configuration) -> None:
