@@ -60,6 +60,16 @@ Dans la fenêtre (**SophosXGS.exe** ou **SophosXGS.bat**), toutes les actions so
 | 16 | **Mes paramètres (nom de ma société, valeurs par défaut)** |
 | 17 | Glossaire : les termes techniques expliqués |
 | 18 | Mise à jour du programme |
+| 19 | **Analyser le réseau du client** (box, serveurs, imprimantes, NAS, caméras) |
+| 20 | **Questionnaire à envoyer au client** avant l'intervention, et import de ses réponses |
+| 21 | **Tableau de bord de tous les clients** (voyant vert / orange / rouge) |
+| 22 | **Compte rendu d'intervention à faire signer** sur l'écran |
+| 23 | Profil de votre société (réponses proposées d'avance) |
+| 24 | Questions où l'on hésite le plus (statistiques locales) |
+| 25 | Rapport mensuel automatique (tâche planifiée Windows) |
+| 26 | **Intervention guidée pas à pas** (boîtier neuf : brancher, allumer, activer l'API, avec vérification à chaque étape) |
+| 27 | Reprendre l'existant : ancien pare-feu Fortinet ou inventaire (CSV, Excel) |
+| 28 | **Vérifier que tout fonctionne chez le client** (tests automatiques et liste à cocher) |
 
 ## 2. Préparer le XGS (à chaque boîtier neuf)
 
@@ -200,6 +210,61 @@ Sans la clé maître de stockage sécurisé (SSMK), les mots de passe et donnée
 1. Zero Touch pour la base.
 2. « Copier le pare-feu modèle » pour vos standards.
 3. L'assistant pour les spécificités du client.
+
+## Pour que n'importe qui puisse le faire (version 5.5)
+
+**Moins de questions**
+- **Mode express** (proposé au début de l'assistant) : une quinzaine de questions indispensables (nom, secteur, serveurs, Wi-Fi invités, télétravail, VPN, accès depuis Internet...). Tout le reste prend le réglage conseillé, écrit à l'écran et dans le fichier Excel.
+- **Analyse du réseau du client** : le PC branché sur le réseau du client, l'outil reconnaît la box (Livebox, Freebox, Box SFR, Bbox) ou l'ancien pare-feu, le serveur Active Directory et son domaine, qui distribue les adresses, les imprimantes, NAS, caméras, serveurs et IPBX. Les réponses correspondantes sont proposées d'avance, et les équipements trouvés peuvent être déclarés d'un clic. Rien n'est modifié, rien n'est envoyé sur Internet.
+- **Questionnaire client** : une page web à envoyer au client avant l'intervention. Il répond dans son navigateur et renvoie un petit fichier. Ses réponses sont proposées dans l'assistant.
+- **Profil de votre société** : à la fin de l'assistant, vos choix habituels (filtrage, alertes, sauvegardes...) peuvent être gardés et proposés aux clients suivants. Les informations propres à un client ne sont jamais gardées.
+- Sous chaque question, la carte indique **d'où vient la réponse proposée** (réseau détecté, questionnaire, profil) et explique les **mots techniques** d'un clic (DHCP, VLAN...).
+
+**Moins de manipulations**
+- **Trouver le pare-feu** (accueil) : cherche tout seul le pare-feu Sophos sur le réseau du PC et remplit son adresse.
+- **Régler mon PC / Remettre mon PC comme avant** (accueil) : donne au PC l'adresse 172.16.16.20 pour joindre un pare-feu neuf, puis remet le réglage d'origine. Windows demande l'autorisation administrateur.
+- **Schéma de branchement** sur l'étape 1 de l'accueil (Port1 = PC, Port2 = box), et **schéma complet du réseau** (ports, réseaux, équipements) créé à chaque simulation.
+- **Visite guidée** au premier lancement (bouton « Visite guidée » pour la revoir).
+- Choix d'un fichier avec un bouton **Parcourir…**
+
+**Zéro risque**
+- **Garde-fous** avant l'envoi : bureau à distance ou partage Windows ouvert à tout Internet, règle qui ouvre tout le réseau, mot de passe administrateur faible, clé Wi-Fi trop courte, administration ouverte côté Internet. Un danger demande une confirmation explicite.
+- **Version du firmware** affichée à la connexion, avec une alerte si elle est trop ancienne.
+- **Erreurs expliquées** en français, avec quoi faire.
+- Après l'envoi : **test d'Internet** depuis le PC et bouton **« Annuler cet envoi »** (retour à l'état d'avant).
+- En cas de coupure : relancer l'envoi suffit, rien n'est créé en double.
+
+**Moins de suivi à faire**
+- **Demander de l'aide** (en bas de la fenêtre) : un dossier .zip pour un expert (ce qui s'est passé, état de la connexion, configuration du PC, fichier du client sans mots de passe, rapports).
+- **Tableau de bord** de tous les clients (vert / orange / rouge), en page web et PDF.
+- **Rapport mensuel automatique** : une tâche planifiée Windows prépare le tableau de bord le 1er du mois.
+- **Compte rendu d'intervention signé** à l'écran par le client (souris ou doigt), en PDF.
+- **Statistiques locales** des questions où l'on hésite le plus, pour savoir quoi simplifier (les réponses ne sont jamais enregistrées).
+
+**Encore plus simple**
+- **Intervention guidée pas à pas** (bouton « Me guider pas à pas » de l'accueil) : une consigne à la fois (brancher le port 1, allumer, assistant Sophos, activer l'API, brancher la box), avec un gros bouton « C'est fait ». L'outil vérifie chaque étape avant de passer à la suivante (il attend que le pare-feu démarre, teste l'API), puis lance l'assistant.
+- **Mode simple** (bouton en haut) : seulement les actions essentielles, et des questions reformulées sans mots techniques (la version technique reste écrite en petit).
+- **Recherche** au-dessus des actions : tapez « vpn », « fortinet », « dhcp »... ; Entrée lance la première action trouvée ; les mots du glossaire sont expliqués en bas.
+
+**Encore moins de saisie**
+- **Reprendre l'existant** : sauvegarde d'un ancien FortiGate (objets, redirections, adresses réservées, réseau local) ou inventaire CSV / Excel (nom, IP, MAC) ajoutés au fichier du client, sans doublon.
+- **Marque des appareils** reconnue pendant l'analyse du réseau (imprimantes Brother, HP, Canon..., caméras Hikvision, Dahua..., NAS Synology, QNAP...) et reprise dans leur nom (IMP-BROTHER-01).
+- **Plan d'adressage** : le réseau proposé pour le LAN évite celui de la box et des réseaux déjà vus (192.168.10, puis 20, 30...).
+- **Noms selon votre convention** (Mes paramètres) : nom du pare-feu, du Wi-Fi salariés, du Wi-Fi invités.
+
+**Envoi encore plus sûr**
+- **Contrôle du fichier** avant l'envoi : noms en double, deux équipements sur la même adresse, adresse fixe dans la plage DHCP, VLAN en double, réseaux qui se chevauchent.
+- **Répétition** sur le pare-feu d'entraînement (intégré à l'outil) avant le vrai envoi : tout est envoyé comme pour de vrai, sans aucun risque.
+- **Envoi en deux temps** : après les réglages réseau, l'outil vérifie que le pare-feu répond encore avant de continuer ; sinon il s'arrête.
+- **Avant / après** en clair dans le rapport : ce qui a été ajouté, modifié, supprimé.
+- **Photo plus complète** avant chaque envoi (zones, interfaces, règles, NAT, comptes, DHCP, VPN...), pour « Revenir en arrière ». L'API de Sophos ne permet pas de télécharger le fichier de sauvegarde officiel : pour cela, utilisez Sophos Central ou la sauvegarde planifiée réglée par l'assistant.
+- **Vérifier que tout fonctionne** après l'installation : Internet et chaque équipement du client testés depuis le PC, puis une liste à cocher (Wi-Fi invités, VPN, imprimantes...). Le résultat est noté dans l'historique.
+
+**Hors ligne et santé de l'outil**
+- Tout se prépare sans Internet ni pare-feu. Les clients préparés mais pas encore envoyés apparaissent sur l'accueil (étape 3) : un clic pour les envoyer une fois sur place.
+- **État de l'outil** au démarrage, en bas de l'accueil : dossier de travail, dossier partagé, composants, navigateur pour les PDF, place sur le disque, version.
+
+**Pas encore fait** (il faut un pare-feu de test) : faire l'assistant de démarrage Sophos et activer l'API automatiquement, créer le Zero Touch par l'API Central, programmer les mises à jour de firmware depuis Central, lire le numéro de série sur une photo, trier les e-mails d'alerte.
 
 ## Fenêtre guidée (version 5.4)
 

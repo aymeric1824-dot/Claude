@@ -66,6 +66,7 @@ SCENARIO_PME = [
     (r"supervisé en SNMP", "o"),
     (r"IP du serveur de supervision", "192.168.1.30"),
     (r"Appliquer la configuration sur le pare-feu maintenant", "o"),
+    (r"Envoyer quand même malgré ces dangers", "o"),   # mots de passe tapés à la main, trop faibles : garde-fou
 ]
 
 

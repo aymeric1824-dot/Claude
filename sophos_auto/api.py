@@ -112,8 +112,10 @@ class SophosAPI:
         return reponse
 
     # ------------------------------------------------------------------ opérations
-    def tester_connexion(self) -> None:
-        self._requete("")
+    def tester_connexion(self) -> dict:
+        reponse = self._requete("")
+        self.version_api = str(reponse.get("@APIVersion", "")) if isinstance(reponse, dict) else ""
+        return reponse
 
     def lire(self, balise: str, nom: str | None = None) -> dict | list | None:
         """Lit un type d'objet (ex. 'IPHost'). Renvoie None s'il n'y en a pas."""

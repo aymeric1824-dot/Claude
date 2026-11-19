@@ -18,7 +18,11 @@ DEFAUTS = {
     "fuseau_defaut": "Europe/Paris",
     "prefixe_admin": "admin-presta",   # identifiant proposé pour le compte administrateur nominatif
     "depot_mises_a_jour": "aymeric1824-dot/Claude",   # dépôt GitHub des nouvelles versions (vide = jamais)
-    "mise_a_jour_auto": True,      # installer seul les nouvelles versions au démarrage (sinon : simple message)
+    "mise_a_jour_auto": True,
+    # Noms proposés (convention de votre société) : {client} = nom du client en minuscules, {CLIENT} en majuscules
+    "modele_nom_pare_feu": "fw-{client}",
+    "modele_wifi": "{CLIENT}",
+    "modele_wifi_invites": "{CLIENT}-INVITES",      # installer seul les nouvelles versions au démarrage (sinon : simple message)
 }
 
 

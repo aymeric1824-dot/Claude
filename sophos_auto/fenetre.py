@@ -39,10 +39,11 @@ THEMES = {
 
 # Colonne de gauche : actions regroupées, avec un libellé court (le libellé complet s'affiche au survol)
 GROUPES = [
-    ("PRÉPARER", ("assistant", "dupliquer", "collecte", "modele")),
-    ("INTERVENIR", ("diagnostic", "appliquer", "conformite", "restaurer", "lire", "central")),
-    ("SUIVRE", ("rappels", "historique", "audit", "documentation")),
-    ("OUTIL", ("dossiers", "parametres", "glossaire", "maj")),
+    ("PRÉPARER", ("intervention", "assistant", "questionnaire", "analyse", "reprise", "dupliquer", "collecte",
+                  "modele")),
+    ("INTERVENIR", ("diagnostic", "appliquer", "verification", "conformite", "restaurer", "lire", "central")),
+    ("SUIVRE", ("tableau", "rappels", "historique", "audit", "documentation", "compte_rendu")),
+    ("OUTIL", ("dossiers", "parametres", "profil", "statistiques", "rapport_mensuel", "glossaire", "maj")),
 ]
 COURTS = {
     "assistant": "Nouveau client / reprendre", "dupliquer": "Copier un client existant",
@@ -53,6 +54,56 @@ COURTS = {
     "rappels": "Rappels", "historique": "Historique d'un client", "audit": "Contrôle de sécurité",
     "documentation": "Dossier technique", "dossiers": "Ouvrir les dossiers", "parametres": "Mes paramètres",
     "glossaire": "Glossaire", "maj": "Mise à jour",
+    "analyse": "Analyser le réseau du client", "questionnaire": "Questionnaire client",
+    "tableau": "Tableau de bord des clients", "compte_rendu": "Compte rendu à signer",
+    "profil": "Profil de ma société", "statistiques": "Questions difficiles", "rapport_mensuel": "Rapport mensuel",
+    "intervention": "Intervention guidée (boîtier neuf)", "reprise": "Reprendre l'existant",
+    "verification": "Vérifier que tout fonctionne",
+}
+# Mode simple : seulement l'essentiel dans la colonne de gauche
+ACTIONS_SIMPLES = ("intervention", "assistant", "appliquer", "verification", "diagnostic", "compte_rendu")
+# Mode simple : les mêmes questions, sans jargon (la version technique reste affichée en petit)
+SIMPLES = {
+    "Port du XGS relié à la box / au routeur": "Sur quel port du pare-feu la box Internet est-elle branchée ?",
+    "Comment ce lien Internet est-il fourni ?": "Comment le client est-il relié à Internet ?",
+    "Le client a-t-il une adresse IP publique FIXE ?":
+        "L'abonnement Internet du client a-t-il une adresse fixe ? (c'est écrit sur le contrat)",
+    "Y a-t-il un DEUXIÈME accès Internet (4G, 2e fibre, ADSL) ?":
+        "Le client a-t-il une deuxième connexion Internet (4G, deuxième ligne) ?",
+    "Port du XGS relié au switch du réseau local": "Sur quel port du pare-feu le réseau des PC est-il branché ?",
+    "Le client a-t-il déjà un réseau en place dont il faut garder les adresses ?":
+        "Faut-il garder les réglages actuels des PC et des imprimantes du client ?",
+    "IP que doit prendre le pare-feu sur le LAN, avec le masque": "Quelle adresse donner au pare-feu dans le réseau du client ?",
+    "IP du pare-feu sur le LAN, avec le masque": "Quelle adresse donner au pare-feu dans le réseau du client ?",
+    "Qui doit distribuer les adresses sur le réseau local ?": "Quel appareil donne automatiquement leur adresse aux PC ?",
+    "Le client a-t-il un Active Directory (domaine Windows) ?":
+        "Les salariés ouvrent-ils leur session Windows avec un compte de l'entreprise ?",
+    "Relier le pare-feu à l'Active Directory ?": "Utiliser les comptes Windows de l'entreprise dans le pare-feu ?",
+    "Le réseau doit-il être découpé en VLAN ?":
+        "Faut-il séparer certains appareils (caméras, téléphones, invités) du réseau des PC ?",
+    "Le client a-t-il des bornes Wi-Fi Sophos (APX / AP6) gérées par le pare-feu ?":
+        "Le client a-t-il des bornes Wi-Fi de la marque Sophos ?",
+    "Créer un Wi-Fi invités (isolé, Internet uniquement) ?":
+        "Créer un Wi-Fi pour les visiteurs, séparé du réseau de l'entreprise ?",
+    "Activer la prévention d'intrusion (IPS) ?": "Bloquer automatiquement les attaques connues ?",
+    "Bloquer les applications indésirables (proxy de contournement, P2P...) ?":
+        "Bloquer les logiciels de téléchargement illégal et de contournement ?",
+    "Analyser les téléchargements (antivirus) ?": "Vérifier les fichiers téléchargés avec un antivirus ?",
+    "Faut-il rendre un équipement interne accessible depuis Internet ?":
+        "Faut-il pouvoir joindre un appareil des locaux depuis l'extérieur (caméras, serveur) ?",
+    "Faut-il relier ce site à un ou plusieurs autres sites ?":
+        "Faut-il relier ces locaux à d'autres locaux du client (agences) ?",
+    "Des personnes doivent-elles se connecter à distance ?":
+        "Des salariés travaillent-ils de chez eux et doivent-ils accéder aux fichiers de l'entreprise ?",
+    "Exiger la double authentification (code sur téléphone) pour le VPN ?":
+        "Demander en plus un code sur le téléphone pour se connecter depuis l'extérieur ?",
+    "Analyser aussi le trafic chiffré (inspection HTTPS) ?":
+        "Analyser aussi les sites sécurisés (https) ? (protection renforcée, à installer sur les PC)",
+    "Choisir les serveurs DNS du pare-feu (sinon ceux de l'opérateur) ?":
+        "Choisir vous-même les serveurs qui traduisent les noms de sites ? (sinon ceux de l'opérateur)",
+    "Le pare-feu doit-il être supervisé en SNMP (PRTG, Zabbix, Centreon...) ?":
+        "Le client a-t-il un logiciel de surveillance du réseau (PRTG, Zabbix...) ?",
+    "Programmer une sauvegarde automatique de la configuration ?": "Sauvegarder automatiquement les réglages du pare-feu ?",
 }
 
 # Écran d'accueil : les 3 étapes pour configurer un pare-feu, dans l'ordre
@@ -63,12 +114,13 @@ ETAPES_ACCUEIL = [
       "Un avertissement de sécurité s'affiche : c'est normal, cliquez sur « Avancé » puis « Continuer ».",
       "Menu « Sauvegarde et firmware » > « API » : cochez « Configuration de l'API », ajoutez l'adresse IP "
       "de votre PC dans « Adresses IP autorisées », puis « Appliquer »."],
-     [("Ouvrir la page du pare-feu", "web", False), ("Je n'arrive pas à me connecter", "diagnostic", False)]),
+     [("Me guider pas à pas", "intervention", True), ("Ouvrir la page du pare-feu", "web", False),
+      ("Je n'arrive pas à me connecter", "diagnostic", False)]),
     ("Décrire le client", "Des questions simples, chacune expliquée, avec une réponse déjà proposée.",
      ["Internet, réseau, Wi-Fi, VPN, sécurité : l'assistant vous guide étape par étape.",
       "En cas de doute, gardez la réponse proposée : elle convient à la plupart des clients.",
       "Tout est enregistré après chaque étape : vous pouvez fermer et reprendre plus tard."],
-     [("Commencer", "assistant", True)]),
+     [("Commencer", "assistant", True), ("Questionnaire pour le client", "questionnaire", False)]),
     ("Envoyer la configuration au pare-feu", "Proposé automatiquement à la fin de l'assistant.",
      ["D'abord une simulation : elle montre ce qui va changer, sans rien envoyer.",
       "Vous confirmez ensuite l'envoi. Un rapport et une sauvegarde sont créés à chaque fois."],
@@ -214,6 +266,23 @@ def _surveiller_connexion(partage: dict, sorties: queue.Queue) -> None:
             if partage.get("fin") or partage.pop("maintenant", False):
                 break
             time.sleep(0.1)
+
+
+def _chercher_pare_feu(sorties: queue.Queue) -> None:
+    from .reseau import trouver_pare_feu
+    try:
+        trouves = trouver_pare_feu()
+    except Exception:
+        trouves = []
+    sorties.put(("pare_feu_trouve", trouves))
+
+
+def _verifier_sante(sorties: queue.Queue) -> None:
+    try:
+        from .sante import verifier
+        sorties.put(("sante", verifier()))
+    except Exception:
+        pass
 
 
 def _tester_api(ip: str, utilisateur: str, mot_de_passe: str, sorties: queue.Queue) -> None:
@@ -397,6 +466,7 @@ class Application:
         reglages = charger_poste()
         self.theme = reglages["theme"] if reglages["theme"] in THEMES else "sombre"
         self.taille = max(8, min(20, int(reglages["taille_texte"] or 10)))
+        self.simple = bool(reglages.get("mode_simple"))
         familles = set(tkfont.families(self.racine))
         self.icones = next((f for f in ("Segoe Fluent Icons", "Segoe MDL2 Assets") if f in familles), None)
 
@@ -447,6 +517,11 @@ class Application:
                 side="right")
         _Bouton(self, droite_tete, "Thème", self.changer_theme, icone=ic(0xE793), petit=True,
                 aide="Passer du thème sombre au thème clair").pack(side="right", padx=(0, 14))
+        self.bouton_simple = _Bouton(self, droite_tete, "", self.changer_mode_simple, icone=ic(0xE8D3), petit=True,
+                                     aide="Mode simple : seulement l'essentiel, et des questions sans mots techniques")
+        self.bouton_simple.pack(side="right", padx=(0, 6))
+        _Bouton(self, droite_tete, "Visite guidée", self.visite_guidee, icone=ic(0xE7BE), petit=True,
+                aide="Revoir la présentation de l'outil en 1 minute").pack(side="right", padx=(0, 6))
         _Bouton(self, droite_tete, "A+", lambda: self.changer_taille(1), petit=True,
                 aide="Agrandir le texte (Ctrl +)").pack(side="right", padx=(0, 6))
         _Bouton(self, droite_tete, "A−", lambda: self.changer_taille(-1), petit=True,
@@ -476,6 +551,9 @@ class Application:
                 aide="Ouvrir le dossier des rapports").pack(side="right", padx=(0, 10))
         _Bouton(self, pied, "Clients", lambda: self.ouvrir("clients"), icone=ic(0xE8B7),
                 aide="Ouvrir le dossier des fichiers clients").pack(side="right", padx=(0, 10))
+        self.bouton_aide = _Bouton(self, pied, "Demander de l'aide", self._dialogue_aide, icone=ic(0xE897),
+                                   aide="Prépare un dossier avec tout ce qu'il faut à un expert pour vous aider")
+        self.bouton_aide.pack(side="right", padx=(0, 10))
         self.bouton_accueil = _Bouton(self, pied, "Accueil", self.montrer_accueil, icone=ic(0xE80F),
                                       aide="Revenir à l'écran d'accueil (les 3 étapes)")
         self.bouton_accueil.pack(side="right", padx=(0, 10))
@@ -497,6 +575,16 @@ class Application:
         peint(tk.Label(entete_g, text="TOUTES LES ACTIONS", font=("Consolas", 9, "bold")), bg="panneau",
               fg="accent").pack(side="left")
 
+        recherche = peint(tk.Frame(gauche, padx=12), bg="panneau")
+        recherche.pack(fill="x", pady=(0, 6))
+        self.recherche = peint(tk.Entry(recherche, font=("Consolas", 10), relief="flat", bd=6, highlightthickness=1),
+                               bg="saisie", fg="texte", insertbackground="accent_vif", highlightbackground="bord_fort",
+                               highlightcolor="accent", selectbackground="accent")
+        self.recherche.pack(fill="x")
+        self.recherche.insert(0, "Rechercher…")
+        self.recherche.bind("<FocusIn>", lambda e: self.recherche.get() == "Rechercher…" and self.recherche.delete(0, "end"))
+        self.recherche.bind("<KeyRelease>", lambda e: self.filtrer_actions() if e.keysym != "Return" else None)
+        self.recherche.bind("<Return>", lambda e: self._lancer_premiere())
         self.liste = peint(tk.Canvas(gauche, highlightthickness=0, bd=0), bg="panneau")
         defil_g = ttk.Scrollbar(gauche, orient="vertical", command=self.liste.yview, style="X.Vertical.TScrollbar")
         self.liste.configure(yscrollcommand=defil_g.set)
@@ -510,6 +598,7 @@ class Application:
             w.bind("<MouseWheel>", self._molette_gauche)
 
         self.boutons = []
+        self.groupes_lignes: list = []      # (titre du groupe, [lignes d'action]) pour filtrer
         self.actions = {cle: (i + 1, libelle, action) for i, (cle, libelle, action) in enumerate(MENU) if action}
         groupes = [(titre, [c for c in cles if c in self.actions]) for titre, cles in GROUPES]
         reste = [c for c in self.actions if not any(c in cles for _t, cles in GROUPES)]
@@ -524,6 +613,7 @@ class Application:
                 side="left", padx=(8, 8))
             peint(tk.Frame(g, height=1), bg="bord").pack(side="left", fill="x", expand=True, padx=(0, 8))
             g.bind("<MouseWheel>", self._molette_gauche)
+            self.groupes_lignes.append((g, []))
             for cle in cles:
                 numero, libelle, action = self.actions[cle]
                 ligne = _Action(self, interieur, numero, COURTS.get(cle, libelle), libelle,
@@ -531,6 +621,7 @@ class Application:
                 ligne.cadre.pack(fill="x", pady=1)
                 ligne.cle = cle
                 self.boutons.append(ligne)
+                self.groupes_lignes[-1][1].append(ligne)
 
         # Colonne de droite : titre, puis accueil ou échanges, puis carte de la question
         droite = peint(tk.Frame(contenu), bg="fond")
@@ -575,6 +666,11 @@ class Application:
         # Les tâches de fond ne gardent jamais de référence à la fenêtre (Tk ne doit être libéré que par le fil principal)
         threading.Thread(target=_verifier_mise_a_jour, args=(self.sorties,), daemon=True).start()
         threading.Thread(target=_surveiller_connexion, args=(self.partage, self.sorties), daemon=True).start()
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            threading.Thread(target=_verifier_sante, args=(self.sorties,), daemon=True).start()
+        self.filtrer_actions()
+        if not reglages.get("visite_faite") and not os.environ.get("PYTEST_CURRENT_TEST"):
+            self.racine.after(900, self.visite_guidee)
 
     # ------------------------------------------------------------------ construction
     def _construire_carte(self, droite):
@@ -678,6 +774,7 @@ class Application:
                 toile.yview_scroll(int(-e.delta / 120) or (-1 if e.delta > 0 else 1), "units")
         toile.bind("<Enter>", lambda e: self.racine.bind_all("<MouseWheel>", molette))
         toile.bind("<Leave>", lambda e: self.racine.unbind_all("<MouseWheel>"))
+        self.accueil_contenu = contenu
         self._construire_connexion(contenu)
         for n, (titre, resume, points, boutons) in enumerate(ETAPES_ACCUEIL, 1):
             carte = peint(tk.Frame(contenu, highlightthickness=1, padx=18, pady=10), bg="carte",
@@ -706,6 +803,15 @@ class Application:
                             fg="texte")
                 lab.pack(side="left", fill="x", expand=True)
                 self.textes_longs.append((lab, 430))
+            if n == 1:
+                self.dessin_ports = peint(tk.Canvas(corps, height=74, highlightthickness=0, bd=0), bg="carte")
+                self.dessin_ports.pack(fill="x", pady=(8, 0))
+                self.dessin_ports.bind("<Configure>", lambda e: self._dessiner_ports())
+                self.carte_01 = carte
+            if n == 2:
+                self.carte_02 = carte
+            if n == 3:
+                self.zone_attente = peint(tk.Frame(corps), bg="carte")
 
     def _accueil_clic(self, cible: str):
         if cible == "web":
@@ -735,6 +841,14 @@ class Application:
         _Bouton(self, tete, "Tester l'accès API", self._dialogue_api, icone=ic(0xE72E), petit=True,
                 aide="Vérifie avec le mot de passe que l'API est activée et que votre PC est autorisé").pack(
             side="right")
+        self.cx_reglage = _Bouton(self, tete, "", self._regler_pc, icone=ic(0xE713), petit=True,
+                                  aide="Règle la carte réseau de votre PC pour joindre un pare-feu neuf, ou la remet "
+                                       "comme avant")
+        self.cx_reglage.pack(side="right", padx=(0, 8))
+        self._libelle_reglage()
+        self.cx_chercher = _Bouton(self, tete, "Trouver le pare-feu", self._chercher, icone=ic(0xE721), petit=True,
+                                   aide="Cherche tout seul le pare-feu Sophos sur le réseau de votre PC")
+        self.cx_chercher.pack(side="right", padx=(0, 8))
 
         ligne = peint(tk.Frame(cadre), bg="carte")
         ligne.pack(fill="x", pady=(10, 0))
@@ -915,6 +1029,369 @@ class Application:
             tk.Label(self.cx_api, text="Tout est prêt : vous pouvez envoyer une configuration au pare-feu.",
                      font=("Arial", 10, "bold"), bg=t["carte"], fg=t["vert"], anchor="w").pack(fill="x", pady=(6, 0))
 
+    # ------------------------------------------------------------------ recherche du pare-feu, réglage du PC
+    def _chercher(self):
+        self.cx_chercher.configure(state="disabled")
+        self.cx_etat.configure(text="Recherche…")
+        self.cx_conseil.configure(text="Recherche du pare-feu sur le réseau de votre PC (environ 10 secondes)…")
+        threading.Thread(target=_chercher_pare_feu, args=(self.sorties,), daemon=True).start()
+
+    def _pare_feu_trouve(self, trouves: list):
+        self.cx_chercher.configure(state="normal")
+        if not trouves:
+            self.cx_conseil.configure(text="Aucun pare-feu Sophos trouvé. Vérifiez qu'il est allumé (3 à 5 minutes de "
+                                           "démarrage) et que le câble va de votre PC au port « Port1 ». Si votre PC "
+                                           "n'a pas d'adresse en 172.16.16.x, cliquez sur « Régler mon PC ».")
+            self._changer_ip_cible()
+            return
+        self.cx_ip.delete(0, "end")
+        self.cx_ip.insert(0, trouves[0])
+        self._changer_ip_cible()
+        autres = f" (autres : {', '.join(trouves[1:])})" if len(trouves) > 1 else ""
+        self.etat.configure(text=f"Pare-feu trouvé à l'adresse {trouves[0]}{autres}.")
+
+    def _libelle_reglage(self):
+        from .reseau import reglage_pc_en_attente
+        self.cx_reglage.configure(text=f"{self.ic(0xE713)}  " + ("Remettre mon PC comme avant" if reglage_pc_en_attente()
+                                                                else "Régler mon PC").strip())
+
+    def _regler_pc(self):
+        from tkinter import messagebox
+
+        from . import reseau
+        if reseau.reglage_pc_en_attente():
+            if messagebox.askyesno("Remettre mon PC comme avant", "Remettre la carte réseau de votre PC comme elle était "
+                                   "avant ?\nWindows va demander l'autorisation.", parent=self.racine):
+                ok = reseau.remettre_pc()
+                self.etat.configure(text="Carte réseau remise comme avant." if ok else "Réglage non fait.")
+        elif messagebox.askyesno("Régler mon PC", "Votre PC va prendre l'adresse 172.16.16.20 sur sa carte réseau filaire, "
+                                 "pour joindre un pare-feu neuf (172.16.16.16).\n\nWindows va demander l'autorisation. "
+                                 "Le réglage actuel est noté : le bouton « Remettre mon PC comme avant » le rétablira.",
+                                 parent=self.racine):
+            ok, message = reseau.regler_pc_filaire()
+            self.etat.configure(text=message)
+        self._libelle_reglage()
+        self.partage["maintenant"] = True
+
+    def _dessiner_ports(self, toile=None):
+        """Étape 01 : la face arrière du pare-feu, avec les deux câbles à brancher."""
+        c, t = toile or self.dessin_ports, THEMES[self.theme]
+        c.delete("all")
+        x0, y0, pas = 4, 6, 46
+        c.create_rectangle(x0, y0, x0 + 8 * pas + 10, y0 + 40, fill=t["panneau"], outline=t["bord_fort"])
+        for k in range(1, 9):
+            x = x0 + 8 + (k - 1) * pas
+            couleur = t["vert"] if k == 1 else (t["accent"] if k == 2 else t["bord_fort"])
+            c.create_rectangle(x, y0 + 8, x + pas - 10, y0 + 32, fill=couleur, outline="")
+            c.create_text(x + (pas - 10) / 2, y0 + 20, text=str(k), fill="#FFFFFF", font=("Consolas", 9, "bold"))
+        c.create_text(x0 + 8 + (pas - 10) / 2, y0 + 54, text="votre PC", fill=t["vert"], font=("Arial", 9, "bold"))
+        c.create_text(x0 + 8 + pas + (pas - 10) / 2, y0 + 54, text="box", fill=t["accent"], font=("Arial", 9, "bold"))
+        c.create_text(x0 + 8 * pas + 26, y0 + 20, anchor="w", fill=t["texte2"], font=("Arial", 9),
+                      text="Port1 : câble vers votre PC (puis vers le switch du client)\n"
+                           "Port2 : câble vers la box Internet")
+
+    # ------------------------------------------------------------------ mode simple, recherche
+    def changer_mode_simple(self):
+        self.simple = not self.simple
+        try:
+            from .poste import enregistrer
+            enregistrer({"mode_simple": self.simple})
+        except OSError:
+            pass
+        self.filtrer_actions()
+
+    def filtrer_actions(self):
+        """Colonne de gauche : mode simple et recherche (sur le libellé court et le libellé complet)."""
+        import unicodedata
+
+        def simplifier(t):
+            return unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode().lower()
+        texte = self.recherche.get().strip()
+        texte = "" if texte == "Rechercher…" else simplifier(texte)
+        for g, lignes in self.groupes_lignes:
+            g.pack_forget()
+            for l in lignes:
+                l.cadre.pack_forget()
+        for g, lignes in self.groupes_lignes:
+            visibles = [l for l in lignes if (not self.simple or texte or l.cle in ACTIONS_SIMPLES)
+                        and (not texte or texte in simplifier(l.complet + " " + l.nom.cget("text")))]
+            if visibles:
+                g.pack(fill="x", pady=(6, 2))
+                for l in visibles:
+                    l.cadre.pack(fill="x", pady=1)
+        self.bouton_simple.configure(text=f"{self.ic(0xE8D3)}  " + ("Mode simple : oui" if self.simple
+                                                                   else "Mode simple : non").strip())
+        if texte:
+            from .glossaire import chercher
+            res = chercher(texte)
+            self.indice(f"{res[0][0]} : {res[0][1]}" if res else None)
+
+    def _lancer_premiere(self):
+        for _g, lignes in self.groupes_lignes:
+            for l in lignes:
+                if l.cadre.winfo_ismapped():
+                    l._clic()
+                    return
+
+    def _afficher_attente(self):
+        """Étape 03 de l'accueil : un bouton par client préparé mais pas encore envoyé."""
+        if not hasattr(self, "zone_attente"):
+            return
+        from . import attente
+        tk, t = self.tk, THEMES[self.theme]
+        for w in self.zone_attente.winfo_children():
+            w.destroy()
+        liste = attente.lister()
+        if not liste:
+            self.zone_attente.pack_forget()
+            return
+        self.zone_attente.pack(fill="x", pady=(8, 0))
+        tk.Label(self.zone_attente, text=f"PRÊT(S) À ENVOYER : {len(liste)}", font=("Consolas", 9, "bold"),
+                 bg=t["carte"], fg=t["jaune"], anchor="w").pack(fill="x", pady=(0, 4))
+        ligne = tk.Frame(self.zone_attente, bg=t["carte"])
+        ligne.pack(fill="x")
+        from .__main__ import action_appliquer
+        for x in liste[:6]:
+            _Bouton(self, ligne, x["client"], lambda f=x["fichier"], c=x["client"]: self.lancer(
+                lambda: action_appliquer(f), f"Envoyer la configuration de {c}", "appliquer"),
+                icone=self.ic(0xE724), petit=True, aide=f"Préparé le {x['date'][:10]} — {x['fichier']}").pack(
+                side="left", padx=(0, 8))
+
+    def _afficher_sante(self, points: list):
+        """En bas de l'accueil : l'état de l'outil (vert si tout va bien, sinon ce qu'il faut corriger)."""
+        tk, t = self.tk, THEMES[self.theme]
+        if not hasattr(self, "accueil_contenu"):
+            return
+        if not hasattr(self, "carte_sante"):
+            self.carte_sante = self.peint(tk.Frame(self.accueil_contenu, highlightthickness=1, padx=18, pady=10),
+                                          bg="carte", highlightbackground="bord", highlightcolor="bord")
+            self.carte_sante.pack(fill="x", pady=(0, 10))
+        for w in self.carte_sante.winfo_children():
+            w.destroy()
+        mauvais = [p for p in points if not p[0]]
+        tk.Label(self.carte_sante, text="ÉTAT DE L'OUTIL : " + ("TOUT VA BIEN" if not mauvais
+                                                              else f"{len(mauvais)} POINT(S) À CORRIGER"),
+                 font=("Consolas", 9, "bold"), bg=t["carte"], fg=t["vert"] if not mauvais else t["jaune"],
+                 anchor="w").pack(fill="x")
+        for ok, quoi, faire in (mauvais or points):
+            tk.Label(self.carte_sante, text=f"{'✓' if ok else '✗'}  {quoi}" + (f" — {faire}" if faire else ""),
+                     font=("Arial", 9), bg=t["carte"], fg=t["texte2"] if ok else t["rouge"], anchor="w", justify="left",
+                     wraplength=max(300, self.droite.winfo_width() - 80)).pack(fill="x", pady=1)
+
+    # ------------------------------------------------------------------ question : informations, fichier, signature
+    def _infos_question(self, q: dict):
+        """Sous l'explication : d'où vient la réponse proposée, et les mots techniques expliqués."""
+        tk, t = self.tk, THEMES[self.theme]
+        if not hasattr(self, "c_infos"):
+            self.c_infos = self.peint(tk.Frame(self.carte), bg="carte")
+        origine = q.get("origine")
+        if q.get("technique"):
+            self.c_infos.pack(fill="x", pady=(8, 0), before=self.c_zone)
+            tk.Label(self.c_infos, text=f"Question technique : {q['technique']}", font=("Arial", 9), bg=t["carte"],
+                     fg=t["discret"], anchor="w", justify="left").pack(fill="x")
+        mots = self._mots_techniques(" ".join([str(q.get("question") or ""), str(q.get("aide") or "")]
+                                              + [str(o) for o in (q.get("options") or [])]))
+        if not origine and not mots:
+            return
+        self.c_infos.pack(fill="x", pady=(8, 0), before=self.c_zone)
+        self.c_infos.pack(fill="x", pady=(8, 0), before=self.c_zone)
+        if origine:
+            tk.Label(self.c_infos, text=f"✓  Réponse proposée d'après : {origine}", font=("Arial", 10, "bold"),
+                     bg=t["carte"], fg=t["vert"], anchor="w").pack(fill="x")
+        if mots:
+            ligne = tk.Frame(self.c_infos, bg=t["carte"])
+            ligne.pack(fill="x", pady=(4, 0))
+            tk.Label(ligne, text="Mots expliqués :", font=("Arial", 9), bg=t["carte"], fg=t["discret"]).pack(side="left")
+            definition = tk.Label(self.c_infos, text="", font=("Arial", 10), bg=t["carte"], fg=t["cyan"], anchor="w",
+                                  justify="left", wraplength=max(300, self.droite.winfo_width() - 80))
+            for mot, sens in mots:
+                b = _Bouton(self, ligne, mot, lambda m=mot, s=sens: (definition.configure(text=f"{m} : {s}"),
+                                                                    definition.pack(fill="x", pady=(4, 0))),
+                            petit=True)
+                b.pack(side="left", padx=(6, 0))
+                self.dynamiques.append(b)
+
+    @staticmethod
+    def _mots_techniques(texte: str) -> list[tuple[str, str]]:
+        from .glossaire import TERMES
+        trouves = []
+        for mot, sens in TERMES.items():
+            if re.search(rf"(?<![\w-]){re.escape(mot)}(?![\w-])", texte, re.IGNORECASE):
+                trouves.append((mot, sens))
+        trouves.sort(key=lambda x: -len(x[0]))
+        garde = []
+        for mot, sens in trouves:            # « VPN site à site » plutôt que « VPN » et « site »
+            if not any(mot.lower() in g.lower() for g, _ in garde):
+                garde.append((mot, sens))
+        return garde[:5]
+
+    def _parcourir(self, types):
+        from tkinter import filedialog
+        types = [tuple(t) for t in (types or [])] + [("Tous les fichiers", "*.*")]
+        chemin = filedialog.askopenfilename(parent=self.racine, title="Choisir le fichier", filetypes=types)
+        if chemin:
+            self.saisie.delete(0, "end")
+            self.saisie.insert(0, os.path.normpath(chemin))
+            self._verifier_saisie()
+
+    def _zone_signature(self):
+        """Cadre où le client signe avec la souris ou le doigt."""
+        import json as _json
+        tk, t = self.tk, THEMES[self.theme]
+        self.c_boutons.pack(fill="x")
+        toile = tk.Canvas(self.c_boutons, width=520, height=170, bg="#FFFFFF", highlightthickness=2,
+                          highlightbackground=t["accent"], cursor="pencil")
+        toile.pack(anchor="w")
+        traits: list = []
+
+        def debut(e):
+            traits.append([[e.x, e.y]])
+
+        def suite(e):
+            if traits:
+                x0, y0 = traits[-1][-1]
+                traits[-1].append([e.x, e.y])
+                toile.create_line(x0, y0, e.x, e.y, fill="#1d1d22", width=2.4, capstyle="round", smooth=True)
+
+        def effacer():
+            traits.clear()
+            toile.delete("all")
+        toile.bind("<ButtonPress-1>", debut)
+        toile.bind("<B1-Motion>", suite)
+        boutons = tk.Frame(self.c_boutons, bg=t["carte"])
+        boutons.pack(fill="x", pady=(8, 0))
+        for b in (_Bouton(self, boutons, "VALIDER LA SIGNATURE",
+                          lambda: self.envoyer(_json.dumps(traits), "(signature)") if traits else None,
+                          principal=True, icone=self.ic(0xE73E)),
+                  _Bouton(self, boutons, "Effacer", effacer, icone=self.ic(0xE74D)),
+                  _Bouton(self, boutons, "Sans signature", lambda: self.envoyer("", "(sans signature)"))):
+            b.pack(side="left", padx=(0, 8))
+            self.dynamiques.append(b)
+
+    # ------------------------------------------------------------------ demander de l'aide
+    def _dialogue_aide(self):
+        tk, t = self.tk, THEMES[self.theme]
+        top, c = self._nouvelle_fenetre("Demander de l'aide")
+        tk.Label(c, text="DEMANDER DE L'AIDE", font=("Consolas", 9, "bold"), bg=t["fond"], fg=t["accent"],
+                 anchor="w").pack(fill="x")
+        tk.Label(c, text="Décrivez le problème en quelques mots", font=("Arial", 15, "bold"), bg=t["fond"],
+                 fg=t["texte"], anchor="w").pack(fill="x", pady=(6, 0))
+        tk.Label(c, text="L'outil prépare un dossier (.zip) avec tout ce qu'il faut à un expert : ce que vous avez vu à "
+                         "l'écran, l'état de la connexion, la configuration du PC, le fichier du client et ses rapports. "
+                         "Aucun mot de passe n'y est mis.", font=("Arial", 10), bg=t["fond"], fg=t["texte2"],
+                 wraplength=500, justify="left", anchor="w").pack(fill="x", pady=(6, 10))
+        message = tk.Text(c, height=5, width=60, font=("Arial", 11), relief="flat", bd=8, wrap="word", bg=t["saisie"],
+                          fg=t["texte"], insertbackground=t["accent_vif"], highlightthickness=1,
+                          highlightbackground=t["bord_fort"], highlightcolor=t["accent"])
+        message.pack(fill="x")
+        tk.Label(c, text="Client concerné (facultatif)", font=("Arial", 9), bg=t["fond"], fg=t["texte2"],
+                 anchor="w").pack(fill="x", pady=(10, 0))
+        client = tk.Entry(c, font=("Consolas", 11), relief="flat", bd=6, bg=t["saisie"], fg=t["texte"],
+                          insertbackground=t["accent_vif"], highlightthickness=1, highlightbackground=t["bord_fort"],
+                          highlightcolor=t["accent"])
+        client.pack(fill="x", pady=(3, 0))
+        bas = tk.Frame(c, bg=t["fond"])
+        bas.pack(fill="x", pady=(14, 0))
+
+        def creer():
+            from .assistance import creer as creer_dossier
+            try:
+                f = creer_dossier(message.get("1.0", "end").strip(), client.get().strip(),
+                                  self.texte.get("1.0", "end"), self.derniere_connexion)
+            except Exception as exc:
+                self.etat.configure(text=f"Dossier d'aide non créé : {exc}")
+                top.destroy()
+                return
+            top.destroy()
+            self.racine.clipboard_clear()
+            self.racine.clipboard_append(str(f.resolve()))
+            self.etat.configure(text=f"Dossier d'aide prêt : {f.name}. Envoyez-le par e-mail (son chemin est copié).")
+            self._ouvrir_fichier(str(f.resolve().parent))
+        _Bouton(self, bas, "PRÉPARER LE DOSSIER", creer, principal=True, icone=self.ic(0xE73E)).pack(side="right")
+        _Bouton(self, bas, "Annuler", top.destroy).pack(side="right", padx=(0, 10))
+        self._centrer(top)
+        message.focus_set()
+
+    # ------------------------------------------------------------------ visite guidée
+    def visite_guidee(self):
+        """Présentation en quelques bulles : où regarder, où cliquer."""
+        if self.en_cours:
+            return
+        self.montrer_accueil()
+        etapes = [
+            (lambda: self.cx_ip.master.master.master, "La connexion au pare-feu",
+             "Ici, l'outil vérifie en permanence que votre PC voit le pare-feu. Vert : tout va bien. Rouge : la phrase "
+             "en dessous dit quoi faire. « Trouver le pare-feu » cherche son adresse tout seul."),
+            (lambda: getattr(self, "carte_01", None), "Étape 1 : préparer le pare-feu",
+             "À faire une seule fois sur un boîtier neuf : deux câbles à brancher, puis quelques clics sur sa page."),
+            (lambda: getattr(self, "carte_02", None), "Étape 2 : décrire le client",
+             "Cliquez sur « Commencer ». Chaque question est expliquée et une réponse est déjà proposée : en cas de "
+             "doute, gardez-la. Le mode express ne pose que l'indispensable."),
+            (lambda: self.liste, "Toutes les actions",
+             "Les autres actions sont ici : envoyer un fichier client, contrôle de sécurité, tableau de bord de vos "
+             "clients, compte rendu à faire signer…"),
+            (lambda: self.bouton_aide.cadre, "Bloqué ?",
+             "« Demander de l'aide » prépare un dossier pour un expert, avec tout ce qu'il faut pour comprendre le "
+             "problème. Bonne configuration !"),
+        ]
+        self._visite = {"etapes": etapes, "rang": 0, "bulle": None}
+        self.racine.after(150, self._etape_visite)
+
+    def _etape_visite(self):
+        tk, t = self.tk, THEMES[self.theme]
+        v = getattr(self, "_visite", None)
+        if not v:
+            return
+        if v["bulle"] is not None:
+            v["bulle"].destroy()
+        if v["rang"] >= len(v["etapes"]):
+            self._fin_visite()
+            return
+        cible, titre_bulle, texte_bulle = v["etapes"][v["rang"]]
+        widget = cible()
+        bulle = tk.Frame(self.racine, bg=t["carte"], highlightthickness=2, highlightbackground=t["accent"],
+                         highlightcolor=t["accent"], padx=16, pady=12)
+        v["bulle"] = bulle
+        tk.Label(bulle, text=f"{v['rang'] + 1} / {len(v['etapes'])} · {titre_bulle.upper()}", font=("Consolas", 9, "bold"),
+                 bg=t["carte"], fg=t["accent"], anchor="w").pack(fill="x")
+        tk.Label(bulle, text=texte_bulle, font=("Arial", 11), bg=t["carte"], fg=t["texte"], wraplength=360,
+                 justify="left", anchor="w").pack(fill="x", pady=(6, 10))
+        bas = tk.Frame(bulle, bg=t["carte"])
+        bas.pack(fill="x")
+        dernier = v["rang"] == len(v["etapes"]) - 1
+
+        def suivant():
+            v["rang"] += 1
+            self._etape_visite()
+        _Bouton(self, bas, "Terminer" if dernier else "Suivant", suivant, principal=True, petit=True).pack(side="right")
+        if not dernier:
+            _Bouton(self, bas, "Passer la visite", self._fin_visite, petit=True).pack(side="right", padx=(0, 8))
+        self.racine.update_idletasks()
+        x, y = 360, 160
+        if widget is not None:
+            try:
+                wx = widget.winfo_rootx() - self.racine.winfo_rootx()
+                wy = widget.winfo_rooty() - self.racine.winfo_rooty()
+                x = min(max(10, wx + 30), self.racine.winfo_width() - bulle.winfo_reqwidth() - 10)
+                y = wy + widget.winfo_height() + 8
+                if y + bulle.winfo_reqheight() > self.racine.winfo_height() - 10:
+                    y = max(10, wy - bulle.winfo_reqheight() - 8)
+            except Exception:
+                pass
+        bulle.place(x=x, y=y)
+        bulle.lift()
+
+    def _fin_visite(self):
+        v = getattr(self, "_visite", None)
+        if v and v["bulle"] is not None:
+            v["bulle"].destroy()
+        self._visite = None
+        try:
+            from .poste import enregistrer
+            enregistrer({"visite_faite": True})
+        except OSError:
+            pass
+
     # ------------------------------------------------------------------ fin d'intervention
     def fenetre_mots_de_passe(self, client: str, liste: list, coffre: bool = False):
         """Mots de passe générés : affichés dans une fenêtre, chacun avec un bouton Copier."""
@@ -976,11 +1453,16 @@ class Application:
                 w.destroy()
             self.resultats.pack(fill="x", pady=(0, 8), before=self.cadre_journal)
         for libelle, chemin in fichiers:
+            if chemin.startswith("action:"):
+                _Bouton(self, self.resultats_boutons, libelle, lambda c=chemin[7:]: self.lancer_cle(c),
+                        icone=self.ic(0xE7A7), petit=True).pack(side="left", padx=(0, 8), pady=(0, 4))
+                continue
             icone = 0xEA90 if chemin.lower().endswith(".pdf") else 0xE8A5
             _Bouton(self, self.resultats_boutons, libelle, lambda c=chemin: self._ouvrir_fichier(c),
                     icone=self.ic(icone), petit=True, aide=chemin).pack(side="left", padx=(0, 8), pady=(0, 4))
-        dossier = os.path.dirname(fichiers[0][1])
-        if not any(getattr(w, "_dossier", False) for w in self.resultats_boutons.winfo_children()):
+        vrais = [c for _l, c in fichiers if not c.startswith("action:")]
+        dossier = os.path.dirname(vrais[0]) if vrais else ""
+        if dossier and not any(getattr(w, "_dossier", False) for w in self.resultats_boutons.winfo_children()):
             b = _Bouton(self, self.resultats_boutons, "Ouvrir le dossier", lambda: self._ouvrir_fichier(dossier),
                         icone=self.ic(0xE8B7), petit=True, aide=dossier)
             b.cadre._dossier = True
@@ -1006,6 +1488,7 @@ class Application:
         self.vue = "accueil"
         self.partage["actif"] = True
         self.partage["maintenant"] = True
+        self._afficher_attente()
         self.fil.configure(text="ACCUEIL")
         self.titre.configure(text="Configurer un pare-feu Sophos")
         self.sous_titre.configure(text="Suivez les 3 étapes ci-dessous, dans l'ordre. "
@@ -1051,6 +1534,8 @@ class Application:
         self._peindre_voyant()
         for b in self.boutons:
             b.peindre()
+        if hasattr(self, "dessin_ports"):
+            self._dessiner_ports()
         self._degrade()
         self._dessiner_progression()
         _barre_de_titre(self.racine, t, self.theme == "sombre")
@@ -1178,6 +1663,10 @@ class Application:
                     self.afficher_connexion(val)
                 elif genre == "test_api":
                     self._afficher_test_api(val)
+                elif genre == "pare_feu_trouve":
+                    self._pare_feu_trouve(val)
+                elif genre == "sante":
+                    self._afficher_sante(val)
                 elif genre == "etat":
                     self.etat.configure(text=val)
         except queue.Empty:
@@ -1193,8 +1682,9 @@ class Application:
             self.dans_assistant = True
             i, total = int(q.get("index", 0)), int(q.get("total", 1))
             self.etape_en_cours = (i, total)
-            self.fil.configure(text=f"ASSISTANT · ÉTAPE {min(i + 1, total)} SUR {total}" if i < total
-                               else "ASSISTANT · DERNIÈRE ÉTAPE")
+            self.fil.configure(text=(f"ASSISTANT · ÉTAPE {min(i + 1, total)} SUR {total}" if i < total
+                                     else "ASSISTANT · DERNIÈRE ÉTAPE")
+                               + (" · MODE EXPRESS" if getattr(self, "mode_express", False) else ""))
             self.titre.configure(text=str(q.get("nom", "")))
             self.sous_titre.configure(text="Répondez aux questions en bas. En cas de doute, gardez la réponse "
                                            "proposée.")
@@ -1208,6 +1698,8 @@ class Application:
             self.fenetre_mots_de_passe(str(q.get("client", "")), list(q.get("liste") or []), bool(q.get("coffre")))
         elif genre == "fichiers":
             self.ajouter_fichiers(list(q.get("fichiers") or []))
+        elif genre == "mode":
+            self.mode_express = bool(q.get("express"))
         else:
             self.carte_attente = q
 
@@ -1220,6 +1712,10 @@ class Application:
             w.destroy()
         for w in (self.ligne_saisie, self.c_note, self.c_boutons, self.c_aide, self.c_pied):
             w.pack_forget()
+        if hasattr(self, "c_infos"):
+            for w in self.c_infos.winfo_children():
+                w.destroy()
+            self.c_infos.pack_forget()
 
     def attendre_reponse(self, masque: bool, invite: str = ""):
         q = self.carte_attente or deviner_question(invite, masque)
@@ -1234,10 +1730,15 @@ class Application:
         genre = q.get("genre", "texte")
         self.c_type.configure(text=self.section.upper() if self.section else "QUESTION")
         self.c_question.configure(text=q.get("question") or "Votre réponse")
+        if self.simple and q.get("question") in SIMPLES:
+            q = dict(q, technique=q["question"])
+            self.question = q
+            self.c_question.configure(text=SIMPLES[q["question"]])
         aide = (q.get("aide") or "").strip()
         if aide:
             self.c_aide.configure(text=aide)
             self.c_aide.pack(fill="x", pady=(6, 0), before=self.c_zone)
+        self._infos_question(q)
 
         self.saisie.configure(state="normal", show="•" if masque else "")
         self._bordure_saisie(None)
@@ -1278,8 +1779,32 @@ class Application:
                         icone=ic(0xE768))
             b.pack(side="left")
             self.dynamiques.append(b)
-        else:   # texte ou mot de passe
+        elif genre == "consigne":
+            self.c_type.configure(text="À FAIRE MAINTENANT")
+            if q.get("illustration") == "ports":
+                toile = self.tk.Canvas(self.c_boutons, height=74, highlightthickness=0, bd=0, bg=THEMES[self.theme]["carte"])
+                self.c_boutons.pack(fill="x")
+                toile.pack(fill="x", pady=(0, 10))
+                self.racine.after(30, lambda: self._dessiner_ports(toile))
+            self.c_boutons.pack(fill="x")
+            ligne = self.tk.Frame(self.c_boutons, bg=THEMES[self.theme]["carte"])
+            ligne.pack(fill="x")
+            for b in (_Bouton(self, ligne, (q.get("bouton") or "C'est fait").upper(), lambda: self.envoyer("", "C'est fait"),
+                              principal=True, icone=ic(0xE73E), grand=True),
+                      _Bouton(self, ligne, "J'ai un problème", lambda: self.envoyer("?", "J'ai un problème"),
+                              icone=ic(0xE897), grand=True)):
+                b.pack(side="left", padx=(0, 10))
+                self.dynamiques.append(b)
+        elif genre == "signature":
+            self._zone_signature()
+        else:   # texte, fichier ou mot de passe
             self.ligne_saisie.pack(fill="x")
+            if genre == "fichier":
+                self.c_boutons.pack(fill="x", pady=(8, 0))
+                b = _Bouton(self, self.c_boutons, "Parcourir…", lambda: self._parcourir(q.get("types")),
+                            icone=ic(0xE8B7), aide="Choisir le fichier dans l'explorateur Windows")
+                b.pack(side="left")
+                self.dynamiques.append(b)
             defaut = str(q.get("defaut") or "")
             if genre == "secret":
                 self._note("La saisie est masquée. Rien n'est enregistré sur le disque.")

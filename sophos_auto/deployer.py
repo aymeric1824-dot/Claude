@@ -269,10 +269,17 @@ table{{border-collapse:collapse;width:100%}}td{{border-bottom:1px solid #eee;pad
 
 
 # ----------------------------------------------------------------------------- sécurité avant / après
+# Toujours photographiés avant un envoi, même si le fichier ne les modifie pas : l'essentiel du pare-feu
+PHOTO_TOUJOURS = {"Zone", "Interface", "VLAN", "FirewallRule", "NATRule", "IPHost", "IPHostGroup", "DHCPServer",
+                  "User", "UnicastRoute", "VPNIPSecConnection", "WirelessNetworks", "AdminSettings", "DNS", "Time"}
+PROPOSER_VERIFICATION = True     # après un envoi réussi, proposer de vérifier les services du client
+
+
 def photo_avant(api: SophosAPI, cfg: Configuration, chemin: Path) -> int:
-    """Enregistre l'état actuel des types d'objets qui vont être modifiés (pour comparer ou revenir en arrière)."""
+    """Enregistre l'état actuel du pare-feu : l'essentiel, plus tout ce que le fichier va modifier
+    (pour comparer avant / après, ou revenir en arrière)."""
     etat = {}
-    for balise in sorted({o.balise for o in cfg.operations}):
+    for balise in sorted({o.balise for o in cfg.operations} | PHOTO_TOUJOURS):
         try:
             etat[balise] = api.lire(balise)
         except ErreurConnexion:
@@ -314,7 +321,7 @@ def verifier_presence(api: SophosAPI, operations: list[Operation]) -> list[Opera
 def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=None, mot_de_passe=None,
              verifier_certificat=False, continuer=False, secrets: dict[str, str] | None = None,
              confirmer=None, ip_pc_apres: str | None = None, seulement: list[str] | None = None,
-             sans_modifier: bool = False, debug: bool = False) -> int:
+             sans_modifier: bool = False, debug: bool = False, repetition: bool = False) -> int:
     print(f"Lecture de {fichier}...")
     cfg = lire_classeur(fichier)
     if seulement:
@@ -349,6 +356,26 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
         n = len(secrets_de(cfg))
         if n:
             print(f"\n{n} mot(s) de passe seront demandés au lancement.")
+        print(f"\n{GRAS}Ce qui sera fait :{FIN}")
+        for ligne in resume_operations(cfg.operations):
+            print(f"  - {ligne}")
+        _garde_fous(fichier)
+        a_ouvrir = []
+        try:
+            from .schema_reseau import branchements, donnees, generer
+            schema = generer(fichier)
+            print(f"\n{GRAS}Branchements :{FIN}")
+            for b in branchements(donnees(fichier)):
+                print(f"  - {b}")
+            print(f"Schéma du réseau : {schema}")
+            a_ouvrir.append(("Schéma du réseau", str(schema)))
+        except Exception as exc:  # le schéma est un bonus
+            print(f"{JAUNE}  (schéma non créé : {exc}){FIN}")
+        try:
+            from .assistant import annoncer_fichiers
+            annoncer_fichiers(a_ouvrir)
+        except Exception:
+            pass
         print(f"\n{VERT}Simulation terminée : rien n'a été envoyé. Requêtes XML dans {dossier}/{FIN}")
         return 0
     historique_client = client
@@ -361,7 +388,9 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
     print(f"Connexion à {ip}:{port}...")
     try:
         api.tester_connexion()
-        print(f"{VERT}✔ Connecté{FIN}\n")
+        print(f"{VERT}✔ Connecté{FIN}")
+        _version(getattr(api, "version_api", ""))
+        print()
         print("Vérification des noms utilisés...")
         problemes = verifier_sur_pare_feu(api, cfg)
         changement_ip = _ip_de_connexion(api, cfg, ip)
@@ -378,8 +407,18 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
     else:
         print(f"{VERT}✔ Tous les noms sont connus{FIN}\n")
 
+    if _garde_fous(fichier):
+        print(f"{ROUGE}Des réglages dangereux sont dans le fichier (voir ci-dessus).{FIN}")
+        rep = confirmer("Envoyer quand même ?") if confirmer else \
+            input("Envoyer quand même malgré ces dangers ? (o/N) ").strip().lower() in ("o", "oui")
+        if not rep:
+            print("Rien n'a été envoyé. Corrigez le fichier Excel, puis relancez.")
+            return 1
+
     horodatage = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
-    photo = Path("rapports") / f"{_fichier(client)}_{horodatage}_avant.json"
+    dossier_rapports = Path("simulation") / _fichier(client) if repetition else Path("rapports")
+    photo = dossier_rapports / (f"{_fichier(client)}_{horodatage}_repetition.json" if repetition
+                                else f"{_fichier(client)}_{horodatage}_avant.json")
     try:
         n = photo_avant(api, cfg, photo)
         print(f"{VERT}✔ État actuel enregistré ({n} types d'objets) : {photo}{FIN}")
@@ -407,7 +446,21 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
     total = len(cfg.operations)
     reussies: list[Operation] = []
     reconnecte = False
+    controle_fait = False
     for o in cfg.operations:
+        if not controle_fait and o.etape > ETAPES["dhcp"] and reussies and o.etape < ETAPES["fin"]:
+            controle_fait = True    # envoi en deux temps : le réseau est en place, le pare-feu répond-il encore ?
+            print(f"\n{GRAS}Contrôle intermédiaire{FIN} : réseau en place, le pare-feu répond-il toujours ?")
+            try:
+                api.tester_connexion()
+                print(f"{VERT}  ✔ Oui : suite de l'envoi (comptes, VPN, règles...){FIN}\n")
+            except ErreurAPI as exc:
+                print(f"{ROUGE}  ✘ Le pare-feu ne répond plus après les réglages réseau : {exc}{FIN}")
+                print(f"{JAUNE}  L'envoi s'arrête ici pour ne rien aggraver. Vérifiez le câble et l'adresse du pare-feu, "
+                      f"ou utilisez « Revenir en arrière ».{FIN}")
+                journal.append("ARRÊT  Contrôle intermédiaire : le pare-feu ne répond plus après les réglages réseau")
+                nb_ko += 1
+                break
         if o.etape >= ETAPES["après"] and changement_ip and not reconnecte:
             reconnecte = True
             api2 = _reconnexion(api, changement_ip, ip_pc_apres, confirmer)
@@ -429,6 +482,8 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
                 res, action = Resultat(True, "", ""), "appliqué (connexion coupée, c'est normal)"
             else:
                 print(f"{ROUGE}✘ Connexion perdue : {exc}{FIN}")
+                print(f"{JAUNE}  Relancez l'envoi une fois la connexion revenue : ce qui est déjà fait sera simplement "
+                      f"vérifié, rien n'est créé en double.{FIN}")
                 journal.append(f"ARRÊT  {o.libelle} : {exc}")
                 nb_ko += 1
                 break
@@ -447,6 +502,7 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
             nb_ko += 1
             aide = f" — à faire à la main : {o.conseil_echec}" if o.conseil_echec else ""
             print(f"{rang} {ROUGE}✘ {o.libelle} — {res.code} : {res.message}{aide}{FIN}")
+            print(f"      {GRIS}→ {expliquer_erreur(res.code, res.message)}{FIN}")
             journal.append(f"ERREUR {o.libelle} — {res.code} : {res.message}{aide}")
 
     print("\nVérification : relecture du pare-feu...")
@@ -460,8 +516,21 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
         journal.append(f"À VÉRIFIER {o.libelle} : introuvable à la relecture")
     if not absents:
         print(f"{VERT}  ✔ Tous les objets créés sont bien présents{FIN}")
+    ecarts = None
+    try:
+        from .comparaison import afficher as afficher_ecarts
+        from .comparaison import comparer
+        photo_apres = photo.with_name(photo.name.replace("_avant.json", "_apres.json").replace("_repetition.json",
+                                                                                              "_repetition_apres.json"))
+        photo_avant(api, cfg, photo_apres)
+        ecarts = comparer(json.loads(photo.read_text(encoding="utf-8")), json.loads(photo_apres.read_text(encoding="utf-8")))
+        afficher_ecarts(ecarts)
+    except (ErreurAPI, OSError, ValueError) as exc:
+        print(f"{JAUNE}  Comparaison avant / après impossible : {exc}{FIN}")
 
     try:
+        if repetition:
+            raise ErreurAPI("pas de contrôle de sécurité pendant une répétition")
         from .audit import CRITIQUE, executer
         constats, chemin_audit = executer(api, f"{api.url.split('//')[1].split('/')[0]}", client)
         critiques = [c for c in constats if c.niveau == CRITIQUE]
@@ -471,13 +540,14 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
             print(f"{ROUGE}  ✘ {c.titre}{FIN}")
             journal.append(f"SÉCURITÉ (critique) {c.titre}")
     except ErreurAPI as exc:
-        print(f"{JAUNE}  Contrôle de sécurité impossible : {exc}{FIN}")
+        if not repetition:
+            print(f"{JAUNE}  Contrôle de sécurité impossible : {exc}{FIN}")
 
     if fichier_trace:
         api.journal = None
         fichier_trace.close()
-    Path("rapports").mkdir(exist_ok=True)
-    rapport = Path("rapports") / f"{_fichier(client)}_{horodatage}.txt"
+    dossier_rapports.mkdir(parents=True, exist_ok=True)
+    rapport = dossier_rapports / f"{_fichier(client)}_{horodatage}{'_repetition' if repetition else ''}.txt"
     rapport.write_text(
         f"Client : {client}\nPare-feu : {ip}:{port}\nDate : {horodatage}\n"
         f"Réussis : {nb_ok}  Échecs : {nb_ko}\n\n" + "\n".join(journal) + "\n"
@@ -485,8 +555,24 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
         encoding="utf-8")
     rapport_web = rapport.with_suffix(".html")
     from .parametres import charger as charger_parametres
-    rapport_web.write_text(rapport_html(client, f"{ip}:{port}", horodatage, journal, cfg.avertissements,
-                                        charger_parametres().get("societe", "")), encoding="utf-8")
+    page_rapport = rapport_html(client, f"{ip}:{port}", horodatage, journal, cfg.avertissements,
+                                charger_parametres().get("societe", ""))
+    if ecarts is not None:
+        from .comparaison import html as html_ecarts
+        page_rapport = page_rapport.replace("</body>", html_ecarts(ecarts) + "</body>")
+    rapport_web.write_text(page_rapport, encoding="utf-8")
+    if repetition:
+        print(f"\n{GRAS}Répétition terminée{FIN} : {nb_ok} accepté(s), {nb_ko} refusé(s) par le pare-feu d'entraînement. "
+              f"Rien n'a été envoyé au vrai pare-feu.")
+        if nb_ko:
+            print(f"{JAUNE}  Le pare-feu d'entraînement ne connaît pas toutes les options d'un vrai XGS : regardez les refus "
+                  f"ci-dessus, la plupart viennent d'une erreur dans le fichier (nom mal écrit, élément manquant).{FIN}")
+        try:
+            from .assistant import annoncer_fichiers
+            annoncer_fichiers([("Rapport de la répétition", str(rapport_web))])
+        except Exception:
+            pass
+        return 0 if nb_ko == 0 else 2
     couleur = VERT if nb_ko == 0 else ROUGE
     print(f"\n{couleur}Terminé : {nb_ok} réussi(s), {nb_ko} échec(s).{FIN} Rapport : {rapport_web}")
     from . import historique
@@ -496,7 +582,111 @@ def deployer(fichier: str, *, simulation=False, ip=None, port=None, utilisateur=
     if changement_ip:
         print(f"{JAUNE}L'IP du pare-feu est maintenant {changement_ip.contenu['IPAddress']} : "
               f"remettez votre PC en DHCP (automatique) s'il le faut.{FIN}")
+    tester_internet()
+    if nb_ko == 0:
+        from . import attente
+        attente.retirer(fichier)
+    print(f"\n{GRIS}Un problème ? « Revenir en arrière » remet le pare-feu dans l'état d'avant cet envoi "
+          f"(état enregistré : {photo}).{FIN}")
+    try:
+        from .assistant import annoncer_fichiers
+        annoncer_fichiers([("Rapport de l'envoi", str(rapport_web))])
+        from .assistant import _annoncer
+        _annoncer(genre="fichiers", fichiers=[("Annuler cet envoi (revenir en arrière)", "action:restaurer")])
+    except Exception:
+        pass
+    if PROPOSER_VERIFICATION:
+        try:
+            from .assistant import oui_non
+            if oui_non("Vérifier maintenant que tout fonctionne chez le client ?", True,
+                       "Tests automatiques depuis votre PC (Internet, serveurs, NAS, imprimantes...), puis quelques "
+                       "vérifications rapides à faire à la main (Wi-Fi invités, VPN). Environ 2 minutes."):
+                from .verification import verifier_services
+                verifier_services(fichier, client)
+        except (EOFError, KeyboardInterrupt):
+            pass
     return 0 if nb_ko == 0 else 2
+
+
+def repeter(fichier: str) -> int:
+    """Répétition : envoie la configuration sur le pare-feu d'entraînement (en mémoire), jamais sur le vrai."""
+    from unittest import mock
+
+    import requests
+
+    from .simulateur import FauxXGS
+    cfg = lire_classeur(fichier)
+    ip = cfg.general.get("Adresse IP du pare-feu") or "172.16.16.16"
+    faux = FauxXGS(mdp="repetition", ip=ip)
+    print(f"{GRAS}RÉPÉTITION sur le pare-feu d'entraînement{FIN} : rien ne sera envoyé au vrai pare-feu.\n")
+    secrets = {s.libelle: "Repetition-Essai-2024" for s in secrets_de(cfg)}
+    with mock.patch.object(requests, "post", faux.post):
+        return deployer(fichier, ip=ip, mot_de_passe="repetition", secrets=secrets, confirmer=lambda q: True,
+                        repetition=True)
+
+
+def _version(version_api: str) -> None:
+    """Version de l'API (elle suit celle du firmware : 1905 = v18.5, 2000 = v19.0/v20, 2100 = v21...)."""
+    if not version_api:
+        return
+    print(f"  Version de l'API du pare-feu : {version_api}")
+    try:
+        principal = int(version_api.split(".")[0])
+    except ValueError:
+        return
+    if principal < 1905:
+        print(f"{JAUNE}  ! Firmware très ancien : mettez le pare-feu à jour (Sauvegarde et firmware > Firmware) avant "
+              f"d'envoyer la configuration. Certaines fonctions pourraient échouer.{FIN}")
+
+
+def _garde_fous(fichier: str) -> bool:
+    """Affiche les réglages dangereux du fichier. Renvoie True s'il y a au moins un danger."""
+    try:
+        from .garde_fous import DANGER, afficher, verifier
+        constats = verifier(fichier)
+    except Exception:
+        return False
+    if not constats:
+        print(f"{VERT}✔ Garde-fous : aucun réglage dangereux{FIN}")
+        return False
+    print(f"\n{GRAS}Garde-fous :{FIN}")
+    afficher(constats)
+    return any(c.niveau == DANGER for c in constats)
+
+
+def expliquer_erreur(code: str, message: str) -> str:
+    from .erreurs import phrase
+    return phrase(code, message)
+
+
+def tester_internet(afficher=print) -> bool:
+    """Depuis ce PC (branché derrière le pare-feu) : Internet fonctionne-t-il toujours ?"""
+    import socket
+    afficher("\nTest d'Internet depuis ce PC...")
+    try:
+        socket.setdefaulttimeout(5)
+        socket.gethostbyname("www.google.com")
+        dns = True
+    except OSError:
+        dns = False
+    finally:
+        socket.setdefaulttimeout(None)
+    web = False
+    if dns:
+        try:
+            import requests
+            web = requests.get("https://www.google.com/generate_204", timeout=8).status_code in (200, 204)
+        except Exception:
+            web = False
+    if dns and web:
+        afficher(f"{VERT}  ✔ Internet fonctionne depuis ce PC (noms et navigation){FIN}")
+    elif dns:
+        afficher(f"{JAUNE}  ! Les noms de sites sont trouvés mais la navigation ne passe pas : vérifiez les règles "
+                 f"de sortie sur Internet et le filtrage web.{FIN}")
+    else:
+        afficher(f"{ROUGE}  ✘ Internet ne répond pas depuis ce PC. Si votre PC est bien branché derrière le pare-feu, "
+                 f"vérifiez le câble de la box (port Internet) ; en cas de doute, « Revenir en arrière ».{FIN}")
+    return dns and web
 
 
 def main(argv: list[str] | None = None) -> int:

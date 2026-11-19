@@ -8,7 +8,7 @@ import re
 import sys
 from pathlib import Path
 
-from .assistant import (FICHE_COLLECTE, Retour, B, C, F, G, J, R, choix, conseil, info, oui_non, texte, titre,
+from .assistant import (FICHE_COLLECTE, Retour, B, C, F, G, GR, J, R, choix, conseil, info, oui_non, texte, titre,
                         _v_ip)
 
 from . import __version__ as VERSION
@@ -37,11 +37,15 @@ def action_assistant():
     assistant.main()
 
 
-def action_appliquer():
-    from .deployer import deployer
-    f = _choisir_fichier_client()
+def action_appliquer(fichier: str | None = None):
+    from .deployer import deployer, repeter
+    f = fichier or _choisir_fichier_client()
     if deployer(f, simulation=True) != 0:
         return
+    if oui_non("Faire d'abord une répétition sur le pare-feu d'entraînement (sans aucun risque) ?", False,
+               "La configuration est envoyée en entier sur un faux pare-feu, dans l'outil : vous voyez ce qui serait "
+               "refusé. Rien ne part vers le vrai pare-feu."):
+        repeter(f)
     if not oui_non("Envoyer cette configuration au pare-feu ?", False):
         return
     prudent = oui_non("Pare-feu déjà en service : ne rien modifier de ce qui existe (création seulement) ?", False,
@@ -77,7 +81,8 @@ def _choisir_fichier_client(question="Quel client ?"):
     f = choix(question, [(str(x), x.stem) for x in fichiers] + [("autre", "Un autre fichier (je donne le chemin)")], 1) \
         if fichiers else "autre"
     if f == "autre":
-        f = texte("Chemin du fichier Excel", valider=lambda t: None if Path(t).exists() else "Fichier introuvable.")
+        from .assistant import choisir_fichier
+        f = choisir_fichier("Fichier Excel du client", [("Fichier Excel", "*.xlsx")])
     return f
 
 
@@ -186,6 +191,187 @@ def action_dupliquer():
             "de l'ancien client. Les mots de passe ont été remis à *demander*.")
 
 
+def action_intervention():
+    from .intervention import guider
+    guider()
+
+
+def action_reprise():
+    from . import import_config
+    from .assistant import choisir_fichier
+    titre("REPRENDRE L'EXISTANT (ancien pare-feu ou inventaire)")
+    info("Ajoute au fichier d'un client ce qui existe déjà : équipements, redirections de ports, adresses réservées. "
+         "Vous relisez ensuite le fichier Excel avant de l'envoyer.")
+    source = choix("D'où vient l'existant ?", [
+        ("fortinet", "Sauvegarde d'un pare-feu Fortinet / FortiGate (fichier .conf)"),
+        ("inventaire", "Un inventaire : fichier CSV ou Excel avec au moins un nom et une adresse IP (export GLPI...)")], 1,
+        "FortiGate : Système > Configuration > Sauvegarde, fichier non chiffré. Inventaire : une ligne de titres "
+        "(Nom, IP, et si possible MAC), puis une ligne par appareil.")
+    if source == "fortinet":
+        f = choisir_fichier("Fichier de sauvegarde du FortiGate", [("Sauvegarde FortiGate", "*.conf"), ("Texte", "*.txt")])
+        try:
+            reprise = import_config.lire_fortinet(Path(f).read_text(encoding="utf-8", errors="replace"))
+        except OSError as exc:
+            print(f"{R}✘ {exc}{F}")
+            return
+    else:
+        f = choisir_fichier("Fichier d'inventaire", [("Inventaire", "*.csv *.xlsx"), ("CSV", "*.csv"), ("Excel", "*.xlsx")])
+        try:
+            reprise = import_config.lire_inventaire(f)
+        except (ValueError, OSError) as exc:
+            print(f"{R}✘ {exc}{F}")
+            return
+    print(f"{G}Trouvé : {reprise.resume()}{F}")
+    for x in reprise.remarques:
+        print(f"{J}  ! {x}{F}")
+    if not (reprise.hotes or reprise.redirections or reprise.reservations):
+        return
+    client = _choisir_fichier_client("Dans quel fichier client les ajouter ?")
+    for x in import_config.ajouter_au_classeur(client, reprise):
+        print(f"  {G}+{F} {x}")
+    if reprise.lan:
+        print(f"{J}  Réseau local de l'ancien pare-feu : {reprise.lan}. Pour garder les mêmes adresses, mettez-la dans "
+              f"l'onglet Interfaces (Port1).{F}")
+    from .garde_fous import afficher, verifier
+    constats = verifier(client)
+    if constats:
+        print(f"\n{B}Contrôle du fichier :{F}")
+        afficher(constats)
+
+
+def action_verification():
+    from .verification import verifier_services
+    titre("VÉRIFIER QUE TOUT FONCTIONNE CHEZ LE CLIENT")
+    info("Votre PC doit être branché sur le réseau du client, derrière le pare-feu (comme un PC du client).")
+    f = _choisir_fichier_client()
+    from .modele import lire_classeur
+    verifier_services(f, lire_classeur(f).general.get("Nom du client") or Path(f).stem)
+
+
+def action_analyse_reseau():
+    from . import reseau
+    titre("ANALYSE DU RÉSEAU DU CLIENT (rien n'est modifié)")
+    info("Branchez votre PC sur le réseau du client, comme un PC normal (sur la box ou un switch). L'outil regarde "
+         "l'équipement actuel vers Internet et les appareils présents. Environ 15 secondes.")
+    an = reseau.analyser(lambda t: print(f"   {t}"))
+    for ligne in an.resume():
+        print(f"  {ligne}")
+    if an.pare_feux:
+        print(f"{G}Pare-feu Sophos trouvé : {', '.join(an.pare_feux)}{F}")
+
+
+def action_questionnaire():
+    from . import questionnaire
+    from .assistant import annoncer_fichiers, choisir_fichier
+    from .parametres import charger
+    titre("QUESTIONNAIRE À ENVOYER AU CLIENT")
+    info("Le client répond à une douzaine de questions simples avant votre venue, dans son navigateur. Ses "
+         "réponses sont ensuite proposées d'avance dans l'assistant.")
+    c = choix("Que voulez-vous faire ?", [
+        ("creer", "Créer le questionnaire à envoyer au client (une page web à joindre à un e-mail)"),
+        ("importer", "Importer les réponses renvoyées par le client (fichier reponses_….json)")], 1)
+    if c == "creer":
+        f = questionnaire.generer(societe=charger().get("societe", ""))
+        print(f"{G}✔ Questionnaire créé : {f}{F}")
+        print("Envoyez ce fichier au client par e-mail. Il l'ouvre, répond, puis clique sur « Enregistrer mes réponses »"
+              " et vous renvoie le petit fichier obtenu.")
+        annoncer_fichiers([("Questionnaire (à envoyer au client)", str(f))])
+    else:
+        f = choisir_fichier("Fichier de réponses du client", [("Réponses du questionnaire", "*.json")])
+        try:
+            nom, cible = questionnaire.importer(f)
+        except (ValueError, OSError) as exc:
+            print(f"{R}✘ {exc}{F}")
+            return
+        print(f"{G}✔ Réponses de « {nom} » enregistrées. Elles seront proposées au lancement de l'assistant.{F}")
+
+
+def action_profil():
+    from . import questionnaire
+    titre("PROFIL DE VOTRE SOCIÉTÉ (réponses proposées d'avance)")
+    profil = questionnaire.lire_profil()
+    if not profil:
+        info("Aucun profil pour l'instant. À la fin de l'assistant, répondez « Oui » à « Garder vos choix comme "
+             "réponses proposées » : vos choix habituels seront proposés aux clients suivants.")
+        return
+    for q, v in profil.items():
+        print(f"  {C}•{F} {q} → {B}{'Oui' if v is True else 'Non' if v is False else v}{F}")
+    if oui_non("Effacer ce profil ?", False):
+        questionnaire.effacer_profil()
+        print(f"{G}✔ Profil effacé.{F}")
+
+
+def action_statistiques():
+    from .statistiques import difficultes
+    titre("QUESTIONS OÙ L'ON HÉSITE LE PLUS")
+    info("Compté sur ce poste (ou le dossier partagé) : questions posées, aides demandées, réponses refusées, retours "
+         "en arrière. Les réponses elles-mêmes ne sont jamais enregistrées.")
+    lignes = difficultes()
+    if not lignes:
+        print(f"{G}Pas encore assez d'utilisations.{F}")
+        return
+    for q, c, score in lignes:
+        print(f"  {J}{score:4.1f}{F}  {q}  {GR}(posée {c.get('posee', 0)}, aide {c.get('aide', 0)}, "
+              f"refusée {c.get('erreur', 0)}, retour {c.get('retour', 0)}){F}")
+
+
+def action_tableau():
+    from .assistant import annoncer_fichiers, page_et_pdf
+    from .tableau import lignes, page
+    titre("TABLEAU DE BORD DE VOS CLIENTS")
+    tous = lignes()
+    if not tous:
+        print(f"{J}Aucun client dans l'historique pour l'instant.{F}")
+        return
+    symbole = {"rouge": f"{R}● IMPORTANT{F}", "orange": f"{J}● à prévoir{F}", "vert": f"{G}● OK{F}"}
+    for l in tous:
+        note = f" — sécurité {l.note}/100" if l.note is not None else ""
+        print(f"  {symbole[l.etat]}  {B}{l.client}{F} — {l.date} {l.derniere}{note}")
+        for r in l.rappels:
+            print(f"        {GR}→ {r}{F}")
+    f = page()
+    annoncer_fichiers([(f"Tableau de bord ({lib})", x) for lib, x in page_et_pdf(f)])
+
+
+def action_compte_rendu():
+    from . import historique
+    from .assistant import annoncer_fichiers, page_et_pdf, signature
+    from .compte_rendu import generer, lire_traits
+    titre("COMPTE RENDU D'INTERVENTION À FAIRE SIGNER")
+    noms = historique.clients()
+    if not noms:
+        print(f"{J}Aucune intervention enregistrée pour l'instant.{F}")
+        return
+    client = choix("Pour quel client ?", [(n, n) for n in reversed(noms)], 1) if len(noms) > 1 else noms[0]
+    remarques = texte("Remarques à ajouter (facultatif)", "", vide_ok=True)
+    signataire = texte("Nom de la personne qui signe (le client)", "", vide_ok=True)
+    traits = lire_traits(signature("Signature du client")) if signataire else []
+    f = generer(client, signataire, traits, remarques)
+    print(f"{G}✔ Compte rendu créé : {f}{F}")
+    annoncer_fichiers([(f"Compte rendu ({lib})", x) for lib, x in page_et_pdf(f)])
+
+
+def action_rapport_mensuel():
+    from . import planification
+    titre("RAPPORT MENSUEL AUTOMATIQUE")
+    info("Le 1er de chaque mois à 8 h, Windows prépare tout seul le tableau de bord de vos clients et la liste des "
+         "rappels, dans le dossier rapports. Le PC doit être allumé ; aucun pare-feu n'est contacté.")
+    actif = planification.existe()
+    print(f"  État : {G + 'activé' if actif else J + 'désactivé'}{F}")
+    c = choix("Que voulez-vous faire ?", [("faire", "Préparer le rapport maintenant"),
+                                          ("activer" if not actif else "desactiver",
+                                           "Activer le rapport automatique" if not actif else "Désactiver le rapport automatique"),
+                                          ("rien", "Rien")], 1)
+    if c == "faire":
+        f = planification.rapport_mensuel()
+        print(f"{G}✔ Rapport : {f}{F}")
+        from .assistant import annoncer_fichiers
+        annoncer_fichiers([("Rapport mensuel", str(f))])
+    elif c in ("activer", "desactiver"):
+        ok, message = planification.creer() if c == "activer" else planification.supprimer()
+        print(f"{G + '✔ Fait.' if ok else R + '✘ ' + message}{F}")
+
+
 def action_parametres():
     from .parametres import charger, enregistrer
     titre("VOS PARAMÈTRES")
@@ -199,6 +385,10 @@ def action_parametres():
         "utilisateur_defaut": texte("Compte admin proposé par défaut", p["utilisateur_defaut"]),
         "fuseau_defaut": texte("Fuseau horaire par défaut", p["fuseau_defaut"]),
         "prefixe_admin": texte("Identifiant du compte administrateur nominatif proposé", p["prefixe_admin"]),
+        "modele_nom_pare_feu": texte("Nom proposé pour le pare-feu ({client} = nom du client)", p["modele_nom_pare_feu"]),
+        "modele_wifi": texte("Nom proposé pour le Wi-Fi salariés ({CLIENT} = nom du client en majuscules)",
+                             p["modele_wifi"]),
+        "modele_wifi_invites": texte("Nom proposé pour le Wi-Fi invités", p["modele_wifi_invites"]),
         "mise_a_jour_auto": oui_non("Installer automatiquement les nouvelles versions au démarrage ?",
                                     bool(p["mise_a_jour_auto"]),
                                     "Oui : à chaque démarrage, le programme vérifie sur GitHub et s'installe tout seul "
@@ -570,6 +760,17 @@ MENU = [
     ("dossiers", "Ouvrir les dossiers (clients, rapports, sauvegardes)", action_dossiers),
     ("parametres", "Mes paramètres (nom de ma société, valeurs par défaut)", action_parametres),
     ("glossaire", "Glossaire : les termes techniques expliqués", action_glossaire),
+    ("analyse", "Analyser le réseau du client (box, serveurs, imprimantes...)", action_analyse_reseau),
+    ("intervention", "Intervention guidée pas à pas (boîtier neuf : brancher, allumer, activer l'API)",
+     action_intervention),
+    ("reprise", "Reprendre l'existant : ancien pare-feu Fortinet ou inventaire", action_reprise),
+    ("verification", "Vérifier que tout fonctionne chez le client (après l'installation)", action_verification),
+    ("questionnaire", "Questionnaire à envoyer au client avant l'intervention", action_questionnaire),
+    ("tableau", "Tableau de bord de tous les clients", action_tableau),
+    ("compte_rendu", "Compte rendu d'intervention à faire signer", action_compte_rendu),
+    ("profil", "Profil de votre société (réponses proposées d'avance)", action_profil),
+    ("statistiques", "Questions où l'on hésite le plus", action_statistiques),
+    ("rapport_mensuel", "Rapport mensuel automatique", action_rapport_mensuel),
     ("maj", "Mise à jour du programme", action_mise_a_jour),
     ("quitter", "Quitter", None),
 ]

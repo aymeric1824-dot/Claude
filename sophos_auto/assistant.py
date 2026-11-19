@@ -64,6 +64,8 @@ INTERFACE = None
 
 
 def _annoncer(**q) -> None:
+    if _FICHIER_EN_COURS and q.get("genre") == "texte":      # question de fichier : bouton « Parcourir… »
+        q = dict(q, **_FICHIER_EN_COURS)
     if INTERFACE is not None:
         try:
             INTERFACE(q)
@@ -114,15 +116,72 @@ def _lire(invite: str) -> str:
         sys.exit(1)
 
 
+# Réponses proposées d'avance : question → (valeur, d'où elle vient). Remplies par l'analyse du réseau,
+# le questionnaire du client et le profil de votre société, dans cet ordre de priorité.
+PREREMPLI: dict[str, tuple[object, str]] = {}
+REPONSES: dict[str, object] = {}       # réponses données pendant l'assistant (pour enregistrer un profil)
+EXPRESS = False                         # mode express : seules les questions indispensables sont posées
+ANALYSE = None                          # résultat de reseau.analyser(), s'il a été fait
+PREPARATION = True                      # questions « Avant de commencer » (désactivées dans les anciens tests)
+# En mode express, ces questions sont toujours posées (elles changent vraiment la configuration)
+ESSENTIELLES = (
+    "Nom du client", "situation ressemble", "secteur d'activité", "géré dans Sophos Central",
+    "réseau en place dont il faut garder", "Active Directory (domaine", "autres serveurs ou équipements",
+    "équipement(s) trouvé(s)", "bornes Wi-Fi Sophos", "Wi-Fi invités", "rendre un équipement interne accessible",
+    "relier ce site", "se connecter à distance", "Créer quand même", "DEUXIÈME accès Internet",
+    "coffre-fort KeePass", "Mot de passe principal", "Appliquer la configuration sur le pare-feu maintenant",
+    "Envoyer au pare-feu", "profil de votre société", "fonctionne", "impriment", "arrive-t-il", "accèdent-ils",
+    "répétition", "C'est fait",
+)
+
+
+def _propose(question: str, defaut):
+    """Valeur proposée pour cette question, et son origine (vide = valeur conseillée par l'outil)."""
+    if question in PREREMPLI:
+        return PREREMPLI[question]
+    return defaut, ""
+
+
+def _automatique(question: str) -> bool:
+    return EXPRESS and not any(m in question for m in ESSENTIELLES)
+
+
+def _stat(question: str, evenement: str) -> None:
+    try:
+        from . import statistiques
+        statistiques.noter(question, evenement)
+    except Exception:  # les statistiques ne doivent jamais gêner une question
+        pass
+
+
+def _express(question: str, affichage: str) -> None:
+    print(f"{B}? {question}{F} {G}→ {affichage}{F} {GR}(mode express : réglage conseillé){F}")
+
+
 def texte(question: str, defaut: str = "", aide: str = "", valider=None, vide_ok=False) -> str:
+    propose, origine = _propose(question, defaut)
+    if isinstance(propose, str) and not (propose and valider and valider(propose)):
+        defaut = propose
+    else:
+        origine = ""
+    if _automatique(question) and (defaut or vide_ok):
+        _express(question, defaut or "(vide)")
+        REPONSES[question] = defaut
+        return defaut
+    _stat(question, "posee")
     while True:
         d = f" [{defaut}]" if defaut else ""
-        _annoncer(genre="texte", question=question, defaut=defaut, aide=aide, vide_ok=vide_ok, valider=valider)
+        _annoncer(genre="texte", question=question, defaut=defaut, aide=aide, vide_ok=vide_ok, valider=valider,
+                  origine=origine)
         rep = _lire(f"{B}? {question}{F}{d} : ")
+        if rep in ("<", "<<"):
+            _stat(question, "retour")
         _retour(rep)
         if _glossaire(rep):
+            _stat(question, "aide")
             continue
         if rep == "?":
+            _stat(question, "aide")
             print(f"{C}{_wrap(aide or 'Pas d’explication supplémentaire pour cette question.')}{F}")
             continue
         if not rep:
@@ -133,51 +192,133 @@ def texte(question: str, defaut: str = "", aide: str = "", valider=None, vide_ok
         if rep and valider:
             erreur = valider(rep)
             if erreur:
+                _stat(question, "erreur")
                 print(f"{R}   {erreur}{F}")
                 continue
+        REPONSES[question] = rep
         return rep
 
 
 def oui_non(question: str, defaut: bool = True, aide: str = "") -> bool:
+    propose, origine = _propose(question, defaut)
+    if isinstance(propose, bool):
+        defaut = propose
+    else:
+        origine = ""
+    if _automatique(question):
+        _express(question, "Oui" if defaut else "Non")
+        REPONSES[question] = defaut
+        return defaut
+    _stat(question, "posee")
     while True:
-        _annoncer(genre="oui_non", question=question, defaut=defaut, aide=aide)
+        _annoncer(genre="oui_non", question=question, defaut=defaut, aide=aide, origine=origine)
         rep = _lire(f"{B}? {question}{F} [{'O/n' if defaut else 'o/N'}] : ").lower()
+        if rep in ("<", "<<"):
+            _stat(question, "retour")
         _retour(rep)
         if _glossaire(rep):
+            _stat(question, "aide")
             continue
         if rep == "?":
+            _stat(question, "aide")
             print(f"{C}{_wrap(aide or 'Pas d’explication supplémentaire.')}{F}")
             continue
         if not rep:
+            REPONSES[question] = defaut
             return defaut
         if rep in ("o", "oui", "y", "yes"):
+            REPONSES[question] = True
             return True
         if rep in ("n", "non", "no"):
+            REPONSES[question] = False
             return False
         print(f"{J}   Répondez o (oui) ou n (non).{F}")
 
 
 def choix(question: str, options: list[tuple[str, str]], defaut: int = 1, aide: str = "") -> str:
     """options = [(clé, libellé)] ; renvoie la clé."""
+    propose, origine = _propose(question, None)
+    cles = [k for k, _ in options]
+    if propose in cles:
+        defaut = cles.index(propose) + 1
+    else:
+        origine = ""
+    if _automatique(question):
+        _express(question, options[defaut - 1][1])
+        REPONSES[question] = options[defaut - 1][0]
+        return options[defaut - 1][0]
+    _stat(question, "posee")
     print(f"{B}? {question}{F}")
     for i, (_, lib) in enumerate(options, 1):
         print(f"   {C}{i}{F}. {lib}")
     while True:
-        _annoncer(genre="choix", question=question, options=[lib for _, lib in options], defaut=defaut, aide=aide)
+        _annoncer(genre="choix", question=question, options=[lib for _, lib in options], defaut=defaut, aide=aide,
+                  origine=origine)
         rep = _lire(f"   Votre choix [{defaut}] : ")
+        if rep in ("<", "<<"):
+            _stat(question, "retour")
         _retour(rep)
         if _glossaire(rep):
+            _stat(question, "aide")
             continue
         if rep == "?":
+            _stat(question, "aide")
             print(f"{C}{_wrap(aide or 'Pas d’explication supplémentaire.')}{F}")
             continue
         if not rep:
+            REPONSES[question] = options[defaut - 1][0]
             return options[defaut - 1][0]
         if rep.lower() == "q" and options[-1][0] in ("quitter", "fin"):
             return options[-1][0]
         if rep.isdigit() and 1 <= int(rep) <= len(options):
+            REPONSES[question] = options[int(rep) - 1][0]
             return options[int(rep) - 1][0]
+        _stat(question, "erreur")
         print(f"{J}   Tapez un numéro entre 1 et {len(options)}.{F}")
+
+
+def choisir_fichier(question: str, types: list[tuple[str, str]] | None = None, aide: str = "") -> str:
+    """Chemin d'un fichier existant. Dans la fenêtre : bouton « Parcourir… »."""
+    global _FICHIER_EN_COURS
+    _FICHIER_EN_COURS = {"genre": "fichier", "question": question, "aide": aide,
+                         "types": types or [("Tous les fichiers", "*.*")]}
+    try:
+        return texte(question, aide=aide,
+                     valider=lambda t: None if Path(t.strip('"')).is_file() else "Fichier introuvable.").strip('"')
+    finally:
+        _FICHIER_EN_COURS = None
+
+
+_FICHIER_EN_COURS = None
+
+
+def signature(question: str = "Signature du client") -> str:
+    """Signature dessinée dans la fenêtre (renvoie le tracé en JSON) ; en mode texte : vide."""
+    _annoncer(genre="signature", question=question,
+              aide="Faites signer le client avec la souris ou le doigt dans le cadre, puis cliquez sur Valider.")
+    if INTERFACE is None:
+        return ""
+    return _lire(f"{question} : ")
+
+
+def nommer(modele: str, client: str) -> str:
+    """Nom selon la convention de la société : {client} → dupont-sa, {CLIENT} → DUPONT-SA."""
+    slug = _slug(client)
+    nom = modele.replace("{client}", slug).replace("{CLIENT}", slug.upper())
+    return re.sub(r"[^A-Za-z0-9._-]", "-", nom)[:63] or slug
+
+
+def reseau_libre(p) -> str:
+    """Adresse proposée pour un nouveau réseau local : 192.168.10.254/24, ou le suivant libre (20, 30...) si ce
+    réseau est déjà utilisé par la box, le PC ou un autre réseau du client. Jamais 192.168.0.x ni 192.168.1.x."""
+    pris = {ipaddress.IPv4Network(n, strict=False) for n in getattr(p, "reseaux_internes", []) if n}
+    if ANALYSE and ANALYSE.carte:
+        pris.add(ANALYSE.carte.reseau)
+    for troisieme in range(10, 250, 10):
+        reseau = ipaddress.IPv4Network(f"192.168.{troisieme}.0/24")
+        if not any(reseau.overlaps(x) for x in pris):
+            return f"192.168.{troisieme}.254/24"
+    return "192.168.10.254/24"
 
 
 def _v_ip(t):
@@ -406,7 +547,7 @@ def etape_intro(p: Projet) -> str:
     nom = texte("Nom du client", aide="Sert à nommer les fichiers, les sauvegardes et le pare-feu.", valider=_v_nom)
     p.general["Nom du client"] = nom
     p.general["Nom d'hôte du pare-feu"] = texte(
-        "Nom du pare-feu", f"fw-{_slug(nom)}",
+        "Nom du pare-feu", nommer(PARAMS.get("modele_nom_pare_feu") or "fw-{client}", nom),
         "Nom technique du boîtier (sans espace). Il apparaît dans les alertes et Sophos Central.",
         lambda t: None if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,62}", t) else "Lettres, chiffres, - et . uniquement.")
     situation = choix("Quelle situation ressemble le plus à celle du client ?", SITUATIONS, 1,
@@ -528,7 +669,7 @@ def etape_lan(p: Projet, situation: str) -> None:
     else:
         conseil("Évitez 192.168.0.x et 192.168.1.x : ce sont les adresses des box à la maison, ce qui bloque le VPN "
                 "télétravail. Choisissez par exemple 192.168.10.0/24.")
-        iface = ipaddress.IPv4Interface(texte("IP du pare-feu sur le LAN, avec le masque", "192.168.10.254/24",
+        iface = ipaddress.IPv4Interface(texte("IP du pare-feu sur le LAN, avec le masque", reseau_libre(p),
                                               "Le masque /24 permet 254 appareils, suffisant dans la plupart des cas.",
                                               _v_iface))
     p.lan_iface = iface
@@ -621,6 +762,17 @@ def etape_serveurs(p: Projet, situation: str) -> None:
     if oui_non("Y a-t-il d'autres serveurs ou équipements importants (NAS, logiciel métier, NVR caméras, IPBX...) ?",
                situation in ("pme", "multi"), "Seulement ceux qui ont une IP fixe et qui serviront dans une règle, "
                                                  "un VPN ou un accès depuis Internet."):
+        detectes = [a for a in (ANALYSE.appareils if ANALYSE else [])
+                    if a.code in CODES_EQUIPEMENTS and a.ip != p.ad_ip]
+        if detectes and oui_non(f"Déclarer les {len(detectes)} équipement(s) trouvé(s) sur le réseau ?", True,
+                                "Trouvés pendant l'analyse : " + " ; ".join(
+                                    f"{a.ip} = {a.libelle}" + (f" ({a.nom})" if a.nom else "") for a in detectes)):
+            for a in detectes:
+                marque = re.sub(r"[^A-Z0-9]+", "", getattr(a, "marque", "").upper())
+                nom = f"{a.code}-{marque + '-' if marque else ''}{len(p.serveurs) + 1:02d}"
+                p.serveurs.append((nom, a.ip, CODES_EQUIPEMENTS[a.code]))
+                p.ligne("Hôtes", Nom=nom, Type="IP", Adresse=a.ip,
+                        Description=CODES_EQUIPEMENTS[a.code] + (f" ({a.nom})" if a.nom else ""))
         types = [("SRV", "Serveur (fichiers, applicatif, logiciel métier)"), ("NAS", "NAS"),
                  ("NVR", "Enregistreur de caméras (NVR)"), ("IPBX", "Téléphonie (IPBX)"),
                  ("IMP", "Imprimante / copieur"), ("EQ", "Autre équipement")]
@@ -713,13 +865,15 @@ def etape_wifi(p: Projet) -> None:
     p.a_faire.append("Bornes Wi-Fi : dans Protéger > Sans fil > Points d'accès, acceptez les bornes détectées et "
                      "affectez-leur les réseaux Wi-Fi créés.")
     if oui_non("Créer un Wi-Fi pour les salariés (même réseau que les PC) ?", True):
-        ssid = texte("Nom du Wi-Fi salariés (SSID)", f"{_slug(p.general['Nom du client']).upper()}")
+        ssid = texte("Nom du Wi-Fi salariés (SSID)", nommer(PARAMS.get("modele_wifi") or "{CLIENT}",
+                                                            p.general["Nom du client"]))
         v, gen = mot_de_passe(f"Clé Wi-Fi ({ssid})", "Mot de passe du Wi-Fi, 8 caractères minimum.")
         p.ligne("Wi-Fi", Nom="WIFI-SALARIES", SSID=ssid, **{"Clé Wi-Fi": p.secret(f"Clé Wi-Fi ({ssid})", v, gen)},
                 Mode="Pont vers le LAN", **{"Isolation des clients": "Non", "SSID masqué": "Non"})
         p.resume.append(f"Wi-Fi salariés « {ssid} » (même réseau que le LAN)")
     if oui_non("Créer un Wi-Fi invités (isolé, Internet uniquement) ?", M(p, "wifi_invites", True)):
-        ssid = texte("Nom du Wi-Fi invités (SSID)", f"{_slug(p.general['Nom du client']).upper()}-INVITES")
+        ssid = texte("Nom du Wi-Fi invités (SSID)", nommer(PARAMS.get("modele_wifi_invites") or "{CLIENT}-INVITES",
+                                                            p.general["Nom du client"]))
         v, gen = mot_de_passe(f"Clé Wi-Fi ({ssid})")
         iface = ipaddress.IPv4Interface(texte("IP du pare-feu sur le Wi-Fi invités", "10.99.0.254/24",
                                               "Réseau totalement séparé du réseau de l'entreprise.", _v_iface))
@@ -1258,17 +1412,32 @@ def etape_fin(p: Projet) -> None:
         print(_wrap(f"{i}. {a}", "  "))
 
     print()
+    if oui_non("Garder vos choix comme réponses proposées pour les prochains clients (profil de votre société) ?", False,
+               "Vos choix habituels (filtrage, alertes, sauvegardes, comptes...) seront proposés d'avance la prochaine "
+               "fois. Les informations propres à ce client (noms, adresses, mots de passe) ne sont jamais gardées."):
+        from . import questionnaire
+        print(f"{G}   Profil enregistré : {questionnaire.enregistrer_profil(REPONSES)} réponse(s) habituelle(s).{F}")
     if not oui_non("Appliquer la configuration sur le pare-feu maintenant ?", False,
                    "Le PC doit être branché sur le pare-feu, l'assistant de démarrage Sophos terminé et l'API activée "
                    "(Sauvegarde et firmware > API, avec l'IP de votre PC autorisée)."):
-        print(f"\nPlus tard : menu {B}« Appliquer un fichier client »{F} et choisissez {Path(xlsx).stem}.")
+        from . import attente
+        attente.ajouter(client, xlsx)
+        print(f"\nPlus tard : sur l'accueil, bouton « {client} » (clients prêts à envoyer), ou action "
+              f"{B}« Envoyer un fichier client »{F}.")
         return
-    from .deployer import deployer
+    from .deployer import deployer, repeter
     print()
     if deployer(xlsx, simulation=True) != 0:
         return
+    if oui_non("Faire d'abord une répétition sur le pare-feu d'entraînement (sans aucun risque) ?", False,
+               "Le pare-feu d'entraînement est un faux pare-feu, dans l'outil. La configuration y est envoyée en entier, "
+               "comme pour de vrai : vous voyez tout de suite ce qui serait refusé. Rien ne part vers le vrai pare-feu."):
+        repeter(xlsx)
     if oui_non("La simulation est correcte. Envoyer au pare-feu ?", True):
         deployer(xlsx, secrets=dict(p.secrets), ip_pc_apres=ip_pc)
+    else:
+        from . import attente
+        attente.ajouter(client, xlsx)
 
 
 def ecrire_fiches_annexes(p: Projet, base: Path) -> list[str]:
@@ -1421,6 +1590,96 @@ def _choisir_brouillon() -> tuple[Projet, int] | None:
     return p, d["etape"]
 
 
+def _propositions_reseau(an) -> list[str]:
+    """Transforme l'analyse du réseau en réponses proposées. Renvoie ce qui a été proposé (pour l'afficher)."""
+    faits = []
+    c = an.carte
+    if not c:
+        return faits
+
+    def proposer(question, valeur, origine):
+        PREREMPLI[question] = (valeur, origine)
+        faits.append(f"{question} → {valeur if not isinstance(valeur, bool) else ('Oui' if valeur else 'Non')}")
+    if an.genre_equipement == "box":
+        proposer("Comment ce lien Internet est-il fourni ?", "DHCP", f"box détectée : {an.equipement}")
+    elif an.genre_equipement == "routeur" and c.passerelle:
+        proposer("Quelle situation ressemble le plus à celle du client ?", "remplacement", f"{an.equipement} détecté")
+        proposer("IP que doit prendre le pare-feu sur le LAN, avec le masque", f"{c.passerelle}/{c.prefixe}",
+                 f"adresse actuelle de l'équipement remplacé ({an.equipement})")
+    ad = next((a for a in an.appareils if a.code == "AD"), None)
+    if ad:
+        proposer("Le client a-t-il un Active Directory (domaine Windows) ?", True, f"serveur {ad.ip} détecté")
+        proposer("IP du contrôleur de domaine", ad.ip, "serveur Active Directory détecté")
+        if c.domaine:
+            proposer("Nom du domaine", c.domaine, "domaine de votre PC")
+    if c.serveur_dhcp and c.passerelle and c.serveur_dhcp != c.passerelle:
+        proposer("Qui doit distribuer les adresses sur le réseau local ?", "srv",
+                 f"l'appareil {c.serveur_dhcp} distribue déjà les adresses")
+    if any(a.code in CODES_EQUIPEMENTS for a in an.appareils):
+        proposer("Y a-t-il d'autres serveurs ou équipements importants (NAS, logiciel métier, NVR caméras, IPBX...) ?",
+                 True, "équipements trouvés sur le réseau")
+    return faits
+
+
+CODES_EQUIPEMENTS = {"SRV": "Serveur (fichiers, applicatif, logiciel métier)", "NAS": "NAS",
+                     "NVR": "Enregistreur de caméras (NVR)", "IPBX": "Téléphonie (IPBX)", "IMP": "Imprimante / copieur"}
+
+
+def preparer_nouveau_client() -> None:
+    """Avant les questions : mode express, profil de la société, questionnaire du client, analyse du réseau."""
+    global EXPRESS, ANALYSE
+    PREREMPLI.clear()
+    REPONSES.clear()
+    titre("AVANT DE COMMENCER")
+    EXPRESS = choix("Comment voulez-vous répondre ?", [
+        ("express", "Mode express (conseillé) : une quinzaine de questions indispensables, tout le reste avec les "
+                    "réglages conseillés"),
+        ("complet", "Mode complet : toutes les questions, une par une")], 1,
+        "Le mode express convient à la grande majorité des clients. Tout ce qui est réglé automatiquement est "
+        "écrit à l'écran et dans le fichier Excel : vous pouvez le relire et le modifier ensuite.") == "express"
+    _annoncer(genre="mode", express=EXPRESS)
+    from . import questionnaire
+    for q, v in questionnaire.lire_profil().items():
+        PREREMPLI[q] = (v, "profil de votre société")
+    dispo = questionnaire.disponibles()
+    if dispo:
+        c = choix("Le client a-t-il rempli le questionnaire ?", [("non", "Non, ou pas pour ce client")] + [
+            (str(i), f"Oui : utiliser les réponses de « {nom} »") for i, (nom, _) in enumerate(dispo)], 1,
+            "Les réponses du client sont proposées d'avance : vous n'avez qu'à les confirmer.")
+        if c != "non":
+            nom, f = dispo[int(c)]
+            reps, notes = questionnaire.reponses(f)
+            for q, v in reps.items():
+                PREREMPLI[q] = (v, f"questionnaire rempli par {nom}")
+            print(f"{G}   {len(reps)} réponse(s) du client reprise(s).{F}")
+            if notes:
+                conseil(f"Message du client : {notes}")
+    if oui_non("Analyser le réseau actuel du client pour pré-remplir les réponses ?", True,
+               "Branchez votre PC sur le réseau du client (sur la box ou un switch, comme un PC normal). L'outil "
+               "regarde l'équipement actuel vers Internet et les appareils présents (serveurs, imprimantes, NAS, "
+               "caméras) pendant environ 15 secondes. Rien n'est modifié et rien n'est envoyé sur Internet."):
+        from . import reseau
+        try:
+            ANALYSE = reseau.analyser(lambda t: print(f"   {t}"))
+            for ligne in ANALYSE.resume()[1:]:
+                print(f"{GR}   {ligne}{F}")
+            faits = _propositions_reseau(ANALYSE)
+            if faits:
+                print(f"{G}   Réponses proposées grâce à l'analyse :{F}")
+                for x in faits:
+                    print(f"{G}     ✔ {x}{F}")
+        except Exception as exc:  # l'analyse est un bonus : elle ne doit jamais bloquer l'assistant
+            print(f"{J}   Analyse impossible : {exc}{F}")
+
+
+def consigne(titre_consigne: str, texte_consigne: str, illustration: str = "", bouton: str = "C'est fait") -> str:
+    """Consigne à suivre (brancher, allumer...) : dans la fenêtre, une carte avec un gros bouton « C'est fait ».
+    Renvoie « » (fait) ou « ? » (l'utilisateur a un problème)."""
+    _annoncer(genre="consigne", question=titre_consigne, aide=texte_consigne, illustration=illustration, bouton=bouton)
+    print(f"\n{B}▶ {titre_consigne}{F}\n{_wrap(texte_consigne)}")
+    return _lire(f"   {bouton} (Entrée) / ? = j'ai un problème : ").strip()
+
+
 def main() -> int:
     PARAMS.update(charger_parametres())
     try:
@@ -1429,6 +1688,13 @@ def main() -> int:
         repris = None
     except KeyboardInterrupt:
         return 1
+    if not repris and PREPARATION:
+        try:
+            preparer_nouveau_client()
+        except Retour:
+            pass
+        except KeyboardInterrupt:
+            return 1
     p, i = repris if repris else (Projet(), 0)
     instantanes: dict[int, Projet] = {}
     try:
@@ -1459,6 +1725,8 @@ def main() -> int:
         print(f"\n{J}Assistant interrompu. {etat}{F}")
         return 1
     _annoncer(genre="etape_fin")
+    global EXPRESS
+    EXPRESS = False          # le mode express ne concerne que cet assistant
     f = DOSSIER_BROUILLONS / f"{_slug(p.general.get('Nom du client', ''))}.json"
     if f.exists():
         f.unlink()

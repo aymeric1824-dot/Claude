@@ -9,3 +9,8 @@ fiche_collecte.txt
 sauvegardes/
 parametres.json
 parametres_poste.json
+# Données de l'équipe et du poste (jamais publiées)
+profil_reponses.json
+statistiques_questions.json
+reseau_pc_avant.json
+assistance/

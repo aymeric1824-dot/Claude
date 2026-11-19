@@ -15,7 +15,7 @@ LIBELLES = {
     "creation": "Configuration préparée (assistant)", "application": "Configuration appliquée",
     "simulation": "Simulation", "audit": "Contrôle de sécurité", "conformite": "Vérification de conformité",
     "restauration": "Retour en arrière", "sauvegarde_central": "Sauvegarde Sophos Central",
-    "import_central": "Import Sophos Central", "duplication": "Client créé par duplication",
+    "import_central": "Import Sophos Central", "duplication": "Client créé par duplication", "compte_rendu": "Compte rendu d'intervention", "verification": "Vérification des services",
 }
 
 

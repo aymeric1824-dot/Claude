@@ -15,7 +15,9 @@ DEFAUTS = {
     "technicien": "",          # apparaît dans l'historique des interventions
     "theme": "sombre",         # sombre (style XPhare) | clair
     "taille_texte": 10,
-    "dossier_partage": "",     # ex. \\\\serveur\\it\\SophosXGS ou un dossier OneDrive synchronisé
+    "dossier_partage": "",
+    "visite_faite": False,     # visite guidée déjà vue sur ce poste
+    "mode_simple": False,      # mode simple : actions essentielles et questions sans jargon     # ex. \\\\serveur\\it\\SophosXGS ou un dossier OneDrive synchronisé
 }
 
 
