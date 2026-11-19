@@ -8,7 +8,7 @@ from sophos_auto.rappels import calculer
 
 def test_reglages_du_poste(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    assert poste.charger()["theme"] == "clair"
+    assert poste.charger()["theme"] == "sombre"
     poste.enregistrer({"technicien": "Aymeric", "theme": "sombre", "inconnu": 1})
     assert poste.charger()["technicien"] == "Aymeric" and "inconnu" not in poste.charger()
 

@@ -13,7 +13,7 @@ from pathlib import Path
 
 DEFAUTS = {
     "technicien": "",          # apparaît dans l'historique des interventions
-    "theme": "clair",          # clair | sombre
+    "theme": "sombre",         # sombre (style XPhare) | clair
     "taille_texte": 10,
     "dossier_partage": "",     # ex. \\\\serveur\\it\\SophosXGS ou un dossier OneDrive synchronisé
 }

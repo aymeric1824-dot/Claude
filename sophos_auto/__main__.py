@@ -1,4 +1,4 @@
-"""Menu principal : python -m sophos_auto  (ou double-clic sur demarrer.bat)."""
+"""Menu principal : python -m sophos_auto  (mode texte ; la fenêtre s'ouvre avec SophosXGS.bat)."""
 from __future__ import annotations
 
 import datetime as dt
@@ -68,6 +68,8 @@ def action_audit():
         return
     afficher(constats)
     print(f"\n{G}Rapport à remettre au client : {chemin}{F}")
+    from .assistant import annoncer_fichiers, page_et_pdf
+    annoncer_fichiers([(f"Rapport de sécurité ({lib})", x) for lib, x in page_et_pdf(chemin)])
 
 
 def _choisir_fichier_client(question="Quel client ?"):
@@ -118,7 +120,10 @@ def action_restaurer():
 def action_documentation():
     from .documentation import generer
     f = _choisir_fichier_client("Dossier technique de quel client ?")
-    print(f"{G}✔ Dossier créé : {generer(f)}{F}  (à ouvrir dans un navigateur, imprimable en PDF)")
+    from .assistant import annoncer_fichiers, page_et_pdf
+    page = generer(f)
+    print(f"{G}✔ Dossier créé : {page}{F}  (à ouvrir dans un navigateur)")
+    annoncer_fichiers([(f"Dossier technique ({lib})", x) for lib, x in page_et_pdf(page)])
 
 
 def action_diagnostic():

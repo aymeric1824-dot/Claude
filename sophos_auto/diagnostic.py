@@ -31,14 +31,31 @@ def ip_locale_vers(ip: str) -> str:
         return ""
 
 
+def port_ouvert(ip: str, port: int = 4444, delai: float = 2.0) -> bool:
+    """Le pare-feu répond-il sur ce port ? (simple ouverture de connexion, aucun identifiant envoyé)"""
+    try:
+        with socket.create_connection((ip, port), timeout=delai):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def meme_reseau(ip_pc: str, ip_pare_feu: str) -> bool:
+    try:
+        return ipaddress.IPv4Address(ip_pc) in ipaddress.IPv4Network(f"{ip_pare_feu}/24", strict=False)
+    except ValueError:
+        return False
+
+
 def diagnostiquer(ip: str, port: int = 4444, utilisateur: str = "admin", mot_de_passe: str | None = None,
-                  demander=getpass.getpass) -> list[tuple[bool, str, str]]:
-    """Renvoie la liste des étapes (réussie ?, étape, conseil)."""
+                  demander=getpass.getpass, afficher: bool = True) -> list[tuple[bool, str, str]]:
+    """Renvoie la liste des étapes (réussie ?, étape, conseil). afficher=False : rien n'est écrit à l'écran."""
     etapes: list[tuple[bool, str, str]] = []
 
     def ajouter(ok, etape, conseil=""):
         etapes.append((ok, etape, conseil))
-        print(f"{VERT + '  ✔' if ok else ROUGE + '  ✘'}{FIN} {etape}" + (f"\n      → {conseil}" if conseil and not ok else ""))
+        if afficher:
+            print(f"{VERT + '  ✔' if ok else ROUGE + '  ✘'}{FIN} {etape}" + (f"\n      → {conseil}" if conseil and not ok else ""))
         return ok
 
     try:
@@ -48,7 +65,7 @@ def diagnostiquer(ip: str, port: int = 4444, utilisateur: str = "admin", mot_de_
         return etapes
     locale = ip_locale_vers(ip)
     if locale:
-        meme = ipaddress.IPv4Address(locale) in ipaddress.IPv4Network(f"{ip}/24", strict=False)
+        meme = meme_reseau(locale, ip)
         ajouter(True, f"Votre PC a l'adresse {locale}" + ("" if meme else " (pas dans le même réseau que le pare-feu)"))
     try:
         with socket.create_connection((ip, port), timeout=5):

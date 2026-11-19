@@ -18,7 +18,7 @@ Un outil pour configurer un pare-feu **Sophos XGS**, **même sans être expert**
 
 **Le plus simple — sans rien installer :**
 1. Téléchargez **SophosXGS.exe** depuis la page **Releases** du dépôt GitHub (dernière version, adresse fixe).
-2. Rangez-le dans un dossier à lui, par exemple `Documents\SophosXGS`, puis double-cliquez dessus. Une **fenêtre** s'ouvre : les actions sont à gauche, et vous répondez aux questions en bas (zone de saisie ou boutons Oui / Non / Valeur proposée / Aide). Le programme crée ses dossiers (`clients`, `rapports`, `sauvegardes`) à côté de lui.
+2. Rangez-le dans un dossier à lui, par exemple `Documents\SophosXGS`, puis double-cliquez dessus. Une **fenêtre** s'ouvre sur un écran d'accueil qui explique les 3 étapes (préparer le pare-feu, décrire le client, envoyer la configuration). Chaque question s'affiche en bas avec son explication et les bons boutons : Oui / Non, liste de choix à cliquer, ou zone de saisie avec la réponse proposée déjà remplie. Le programme crée ses dossiers (`clients`, `rapports`, `sauvegardes`) à côté de lui.
 3. Il **se met à jour tout seul** : à chaque démarrage, il vérifie sur GitHub si une nouvelle version existe.
    - Si oui, il la télécharge et contrôle son empreinte SHA-256 par rapport à celle publiée par GitHub.
    - Il garde l'ancienne version en secours (`SophosXGS.ancien.exe`), installe la nouvelle et redémarre dessus.
@@ -34,12 +34,11 @@ Un outil pour configurer un pare-feu **Sophos XGS**, **même sans être expert**
 1. Installez **Python 3.10 ou plus récent** depuis <https://www.python.org/downloads/>.
    Sous Windows, **cochez « Add Python to PATH »** pendant l'installation.
 2. Téléchargez ce dossier (bouton *Code > Download ZIP* sur GitHub), puis décompressez-le.
-3. Double-cliquez sur **`installer.bat`**.
-   Sinon, ouvrez un terminal dans le dossier et tapez `pip install -r requirements.txt`.
+3. Double-cliquez sur **`SophosXGS.bat`** : c'est le **seul fichier à lancer**. Au premier lancement, il installe tout seul les composants nécessaires (une minute), puis ouvre la fenêtre. Les fois suivantes, la fenêtre s'ouvre directement, sans console noire.
 
 ## Le menu principal
 
-Double-cliquez sur **SophosXGS.exe**, ou sur `demarrer.bat`, ou tapez `python -m sophos_auto`. Tapez `q` pour quitter.
+Dans la fenêtre (**SophosXGS.exe** ou **SophosXGS.bat**), toutes les actions sont dans la colonne de gauche. Le même menu existe en mode texte : `python -m sophos_auto` (tapez `q` pour quitter).
 
 | N° | Fonction |
 |---|---|
@@ -82,7 +81,7 @@ répondez « oui » à la question Zero Touch de l'assistant. La fiche du client
 
 ## 3. Lancer l'assistant
 
-Menu 1, ou double-clic sur **`assistant.bat`**.
+Dans la fenêtre : bouton **Commencer** de l'écran d'accueil (ou action « Nouveau client / reprendre » à gauche).
 
 L'assistant commence par vous demander à quelle **situation** ressemble le client :
 
@@ -129,7 +128,7 @@ python -m sophos_auto.deployer clients/dupont.xlsx --simulation    # vérifie, n
 python -m sophos_auto.deployer clients/dupont.xlsx                 # applique
 ```
 
-Vous pouvez aussi glisser le fichier Excel sur **`lancer.bat`**.
+Dans la fenêtre : action **« Envoyer un fichier client »** (une simulation est toujours faite avant l'envoi).
 
 Avant d'envoyer quoi que ce soit, le script :
 - **contrôle le fichier** : IP, masques, MAC, ports, doublons. Chaque erreur est affichée avec l'onglet et la ligne ;
@@ -201,6 +200,24 @@ Sans la clé maître de stockage sécurisé (SSMK), les mots de passe et donnée
 1. Zero Touch pour la base.
 2. « Copier le pare-feu modèle » pour vos standards.
 3. L'assistant pour les spécificités du client.
+
+## Fenêtre guidée (version 5.4)
+
+Pensée pour qu'une personne sans connaissance réseau puisse configurer un pare-feu.
+
+- **Un seul lanceur** : `SophosXGS.bat` (ou `SophosXGS.exe`). Plus de console noire.
+- **Écran d'accueil en 3 étapes** : préparer le pare-feu, décrire le client, envoyer la configuration, avec un bouton pour chacune.
+- **Connexion au pare-feu en direct**, en haut de l'accueil :
+  - l'adresse IP de votre PC, avec un bouton Copier (à coller dans « Adresses IP autorisées » du pare-feu) ;
+  - l'adresse du pare-feu, modifiable, et un voyant vert ou rouge mis à jour toutes les 4 secondes, avec la marche à suivre quand il est rouge ;
+  - « Tester l'accès API » : vérifie avec le mot de passe que l'API est activée et que votre PC est autorisé. Le mot de passe n'est utilisé que pour ce test. La surveillance automatique n'envoie jamais d'identifiant, pour ne pas faire bloquer le PC par le pare-feu.
+- **Questions claires** : chaque question s'affiche dans une carte avec son explication, de gros boutons Oui / Non, une liste de choix à cliquer, ou une zone de saisie déjà remplie avec la réponse proposée. Une barre montre l'avancement (« Étape 3 sur 16 »).
+- **Réponses vérifiées pendant la frappe** : une adresse IP, un masque ou un e-mail mal écrit est signalé en rouge avec l'exemple attendu, avant même de valider.
+- **Fin d'intervention** :
+  - les mots de passe générés s'affichent dans une fenêtre, chacun avec un bouton Copier ;
+  - le coffre KeePass (`.kdbx`) reste proposé ;
+  - le dossier technique et le rapport de sécurité sont aussi créés **en PDF** (avec Microsoft Edge ou Google Chrome, déjà présents sur le PC) ;
+  - un bouton ouvre chaque fichier créé (PDF, fiche, fichier Excel).
 
 ## Confort d'utilisation (version 5.3)
 

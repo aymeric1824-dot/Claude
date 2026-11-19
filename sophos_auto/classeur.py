@@ -15,7 +15,7 @@ JAUNE = PatternFill("solid", fgColor="FFF2CC")
 AIDE = [
     "MODE D'EMPLOI",
     "",
-    "Le plus simple : lancez l'assistant (assistant.bat ou « python -m sophos_auto.assistant »).",
+    "Le plus simple : ouvrez l'outil (SophosXGS.bat ou SophosXGS.exe) et cliquez sur « Commencer ».",
     "Il pose les questions et remplit ce fichier pour vous.",
     "",
     "Pour remplir à la main :",

@@ -58,12 +58,43 @@ def _glossaire(rep: str) -> bool:
 
 
 # ============================================================================ questions
+# La fenêtre s'inscrit ici pour recevoir la description de chaque question (type, valeur proposée,
+# explication, choix possibles) et l'afficher clairement. En mode texte, rien ne change.
+INTERFACE = None
+
+
+def _annoncer(**q) -> None:
+    if INTERFACE is not None:
+        try:
+            INTERFACE(q)
+        except Exception:  # l'affichage ne doit jamais bloquer une question
+            pass
+
+
+def annoncer_fichiers(fichiers: list[tuple[str, str]]) -> None:
+    """Fichiers créés (libellé, chemin) : la fenêtre affiche un bouton pour ouvrir chacun."""
+    _annoncer(genre="fichiers", fichiers=[(lib, str(Path(f).resolve())) for lib, f in fichiers if f and Path(f).exists()])
+
+
+def page_et_pdf(page) -> list[tuple[str, str]]:
+    """Page HTML créée : on la convertit aussi en PDF (si un navigateur est présent). Renvoie les fichiers."""
+    from .pdf import en_pdf
+    fichiers = []
+    pdf = en_pdf(page)
+    if pdf:
+        print(f"  - {pdf}  (la même page en PDF, prête à envoyer)")
+        fichiers.append(("PDF", str(pdf)))
+    fichiers.append(("Page web", str(page)))
+    return fichiers
+
+
 def _wrap(t: str, indent="   ") -> str:
     return "\n".join(textwrap.fill(p, LARGEUR, initial_indent=indent, subsequent_indent=indent) if p.strip() else ""
                      for p in t.strip("\n").split("\n"))
 
 
 def titre(t: str) -> None:
+    _annoncer(genre="titre", texte=t)
     print(f"\n{C}{B}{'═' * LARGEUR}\n  {t}\n{'═' * LARGEUR}{F}")
 
 
@@ -86,6 +117,7 @@ def _lire(invite: str) -> str:
 def texte(question: str, defaut: str = "", aide: str = "", valider=None, vide_ok=False) -> str:
     while True:
         d = f" [{defaut}]" if defaut else ""
+        _annoncer(genre="texte", question=question, defaut=defaut, aide=aide, vide_ok=vide_ok, valider=valider)
         rep = _lire(f"{B}? {question}{F}{d} : ")
         _retour(rep)
         if _glossaire(rep):
@@ -108,6 +140,7 @@ def texte(question: str, defaut: str = "", aide: str = "", valider=None, vide_ok
 
 def oui_non(question: str, defaut: bool = True, aide: str = "") -> bool:
     while True:
+        _annoncer(genre="oui_non", question=question, defaut=defaut, aide=aide)
         rep = _lire(f"{B}? {question}{F} [{'O/n' if defaut else 'o/N'}] : ").lower()
         _retour(rep)
         if _glossaire(rep):
@@ -130,6 +163,7 @@ def choix(question: str, options: list[tuple[str, str]], defaut: int = 1, aide: 
     for i, (_, lib) in enumerate(options, 1):
         print(f"   {C}{i}{F}. {lib}")
     while True:
+        _annoncer(genre="choix", question=question, options=[lib for _, lib in options], defaut=defaut, aide=aide)
         rep = _lire(f"   Votre choix [{defaut}] : ")
         _retour(rep)
         if _glossaire(rep):
@@ -217,10 +251,13 @@ def mot_de_passe(libelle: str, aide: str = "", generer_ok=True) -> tuple[str, bo
         print(f"   {G}→ {libelle} : {B}{v}{F}   {J}(notez-le dans votre coffre-fort de mots de passe){F}")
         return v, True
     while True:
+        _annoncer(genre="secret", question=libelle, aide="8 caractères minimum. La saisie est masquée ; "
+                  "il vous sera demandé de la taper deux fois.")
         v = getpass.getpass(f"{B}? {libelle}{F} (saisie masquée) : ")
         if len(v) < 8:
             print(f"{J}   8 caractères minimum.{F}")
             continue
+        _annoncer(genre="secret", question=f"Confirmez « {libelle} »", aide="Retapez exactement le même mot de passe.")
         if getpass.getpass("   Confirmez : ") == v:
             return v, False
         print(f"{J}   Les deux saisies sont différentes.{F}")
@@ -349,10 +386,15 @@ def etape_intro(p: Projet) -> str:
     info("Cet assistant vous pose des questions sur le client, puis prépare toute la configuration du pare-feu. "
          "À la fin, il crée un fichier Excel (modifiable), une fiche récapitulative, et peut appliquer la "
          "configuration sur le boîtier.")
-    info("Règles : appuyez sur Entrée pour garder la valeur proposée entre [crochets]. Tapez ? à n'importe quelle "
-         "question pour avoir une explication, ?? suivi d'un mot pour le glossaire (ex. ?? vlan). Tapez < pour recommencer l'étape en cours, << pour revenir à "
-         "l'étape précédente. Vos réponses sont enregistrées après chaque étape : en cas d'interruption, vous "
-         "pourrez reprendre. Ctrl+C pour quitter.")
+    if INTERFACE is not None:
+        info("Chaque question s'affiche en bas avec son explication et une réponse proposée : en cas de doute, "
+             "gardez-la. Les boutons « Recommencer cette étape » et « Étape précédente » permettent de corriger. "
+             "Vos réponses sont enregistrées après chaque étape : vous pouvez fermer et reprendre plus tard.")
+    else:
+        info("Règles : appuyez sur Entrée pour garder la valeur proposée entre [crochets]. Tapez ? à n'importe quelle "
+             "question pour avoir une explication, ?? suivi d'un mot pour le glossaire (ex. ?? vlan). Tapez < pour "
+             "recommencer l'étape en cours, << pour revenir à l'étape précédente. Vos réponses sont enregistrées "
+             "après chaque étape : en cas d'interruption, vous pourrez reprendre. Ctrl+C pour quitter.")
     if oui_non("Afficher d'abord la liste des informations à demander au client ?", False,
                "Utile si vous n'êtes pas encore chez le client : la liste est aussi enregistrée dans un fichier."):
         print(FICHE_COLLECTE)
@@ -1190,12 +1232,20 @@ def etape_fin(p: Projet) -> None:
     print(f"\n{G}Fichiers créés :{F}\n  - {xlsx}  (configuration, modifiable dans Excel)\n  - {base}_fiche.txt  (récapitulatif et étapes manuelles)")
     for f in fiches:
         print(f"  - {f}")
+    a_ouvrir = []
     try:
         from .documentation import generer
-        print(f"  - {generer(xlsx)}  (dossier technique à remettre au client)")
+        page = generer(xlsx)
+        print(f"  - {page}  (dossier technique à remettre au client)")
+        a_ouvrir += [(f"Dossier technique ({lib})", f) for lib, f in page_et_pdf(page)]
     except Exception as exc:  # le dossier est un bonus : ne jamais bloquer la fin de l'assistant
         print(f"{J}  (dossier technique non généré : {exc}){F}")
+    a_ouvrir += [("Fiche récapitulative", f"{base}_fiche.txt"), ("Fichier Excel du client", xlsx)]
+    if Path(f"{base}.kdbx").exists():
+        a_ouvrir.append(("Coffre KeePass", f"{base}.kdbx"))
+    annoncer_fichiers(a_ouvrir)
     if p.generes:
+        _annoncer(genre="mots_de_passe", client=client, liste=list(p.generes), coffre=Path(f"{base}.kdbx").exists())
         print(f"\n{J}{B}Mots de passe générés — NOTEZ-LES MAINTENANT (ils ne sont enregistrés nulle part) :{F}")
         for lib, v in p.generes:
             print(f"  {lib:<55} {B}{v}{F}")
@@ -1384,6 +1434,7 @@ def main() -> int:
     try:
         while i < len(ETAPES):
             instantanes[i] = copy.deepcopy(p)
+            _annoncer(genre="etape", index=i, total=len(ETAPES), nom=ETAPES[i][0])
             try:
                 ETAPES[i][1](p)
             except Retour as r:
@@ -1394,6 +1445,7 @@ def main() -> int:
                 continue
             i += 1
             enregistrer_brouillon(p, i)
+        _annoncer(genre="etape", index=len(ETAPES), total=len(ETAPES), nom="Récapitulatif")
         while True:
             try:
                 etape_fin(p)
@@ -1406,6 +1458,7 @@ def main() -> int:
             else "Rien n'a été enregistré."
         print(f"\n{J}Assistant interrompu. {etat}{F}")
         return 1
+    _annoncer(genre="etape_fin")
     f = DOSSIER_BROUILLONS / f"{_slug(p.general.get('Nom du client', ''))}.json"
     if f.exists():
         f.unlink()
